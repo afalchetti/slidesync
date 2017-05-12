@@ -226,8 +226,8 @@ int compare_lexiconumerical(const wxString& a, const wxString& b)
 			unsigned int q;
 			
 			// p and q will point to the end of the number
-			for (p = i; p < a.length() && isnumeric(a[p]); p++) {}
-			for (q = k; q < b.length() && isnumeric(a[q]); q++) {}
+			for (p = i + 1; p < a.length() && isnumeric(a[p]); p++) {}
+			for (q = k + 1; q < b.length() && isnumeric(b[q]); q++) {}
 			
 			// char lengths of the numbers
 			int alen = p - i;
@@ -239,15 +239,15 @@ int compare_lexiconumerical(const wxString& a, const wxString& b)
 			
 			// the numbers have the same length, they can be compared lexicographically
 			for (; i < p; i++, k++) {
-				diff = (int) a[i] - (int) a[k];
+				diff = (int) a[i] - (int) b[k];
 				
 				if (diff != 0) {
 					return diff;
 				}
 			}
 			
-			i = p;
-			k = q;
+			i = p - 1;
+			k = q - 1;
 		}
 		else {
 			diff = (int) a[i] - (int) b[k];
