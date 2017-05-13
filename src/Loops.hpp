@@ -63,6 +63,13 @@ private:
 	/// Hence, the video is subsampled, i.e. the effective framecount is framecount / (frameskip + 1).
 	static const unsigned int frameskip = 7;
 	
+	/// @brief Maximum ratio between best match and second match's distance to consider
+	///        a keypoint pair a good match
+	static constexpr float max_matchratio = 0.8;
+	
+	/// @brief RANSAC threshold to decide a point is within the inlier group
+	static constexpr float RANSAC_threshold = 2.5;
+	
 	/// @brief OpenGL canvas observer reference
 	CVCanvas* canvas;
 	
@@ -87,8 +94,26 @@ private:
 	/// @brief Slide index
 	int slide_index;
 	
+	/// @brief Keypoint detector
+	cv::Ptr<cv::Feature2D> detector;
+	
+	/// @brief Keypoint matcher
+	cv::Ptr<cv::DescriptorMatcher> matcher;
+	
+	/// @brief Precomputed keypoints for each slide
+	std::vector<std::vector<cv::KeyPoint>> slide_keypoints;
+	
+	/// @brief Precomputed keypoint descriptors for each slide
+	std::vector<Mat> slide_descriptors;
+	
 	/// @brief Previous frame (for differential processing)
 	Mat prev_frame;
+	
+	/// @brief Previously computed keypoints for the previous frame
+	std::vector<cv::KeyPoint> prev_frame_keypoints;
+	
+	/// @brief Previously computed keypoint descriptors for the previous frame
+	Mat prev_frame_descriptors;
 	
 	/// @brief Description of the slide pose in the previous frame
 	/// 
@@ -131,13 +156,22 @@ private:
 	/// @brief First processing stage. Initializes the required internal resources
 	/// 
 	/// Pre-processes the slide images and matches them to the first frame.
-	void Initialize();
+	void initialize();
 	
 	/// @brief Main processing stage. Follows the slide projection in the frame
 	/// 
 	/// As the processor detects slide changes in the footage, it will update
 	/// the sync instructions, which can be retrieved later with GetSyncInstructions().
-	void Track();
+	void track();
+	
+	/// @brief Idle processing stage. Do nothing
+	/// 
+	/// Usually entered when the work has finished or
+	/// an error won't allow further processing.
+	void idle();
+	
+	/// @brief Get the next frame on the footage
+	Mat next_frame();
 };
 
 }

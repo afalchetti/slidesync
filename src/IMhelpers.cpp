@@ -98,15 +98,15 @@ std::vector<Magick::Image*> readpdf_im(string filename, int framewidth, int fram
 		return slides;
 	}
 	
-	double resolution = 0;
+	float resolution = 0;
 	
 	// fit the slides bounding box to the frame
-	if (((double) framewidth) / testwidth < ((double) frameheight) / testheight) {
+	if (((float) framewidth) / testwidth < ((float) frameheight) / testheight) {
 		// pagewidth = width / resolution is constant and then solve for resolution
-		resolution = ((double) testresolution) * framewidth / testwidth;
+		resolution = ((float) testresolution) * framewidth / testwidth;
 	}
 	else {
-		resolution = ((double) testresolution) * frameheight / testheight;
+		resolution = ((float) testresolution) * frameheight / testheight;
 	}
 	
 	const int antialias = 4;

@@ -361,7 +361,7 @@ bool SlideSyncApp::OnInit()
 	footage.open(videofname, cv::CAP_ANY);
 	
 	if (!footage.isOpened()) {
-		std::cerr << "Can't open footage video file." << std::endl;
+		std::cerr << "Can't open footage video file" << std::endl;
 		return false;
 	}
 	
