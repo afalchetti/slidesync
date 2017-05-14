@@ -18,6 +18,7 @@
 // limitations under the License.
 
 #include <cmath>
+#include <limits>
 
 #include <opencv2/opencv.hpp>
 
@@ -51,10 +52,13 @@ SyncLoop::SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, vector<Mat>* sli
 	  matcher(cv::DescriptorMatcher::create("BruteForce-Hamming")),
 	  slide_keypoints(),
 	  slide_descriptors(),
-	  prev_frame(),
-	  prev_frame_keypoints(),
-	  prev_frame_descriptors(),
-	  prev_slidepose(),
+	  ref_frame(),
+	  ref_frame_keypoints(),
+	  ref_frame_descriptors(),
+	  ref_quad_keypoints(),
+	  ref_quad_descriptors(),
+	  ref_quad_indices(),
+	  ref_slidepose(),
 	  sync_instructions(slides->size(), (unsigned int) round(footage->get(cv::CAP_PROP_FPS))),
 	  processor(&SyncLoop::initialize) {}
 
@@ -78,122 +82,6 @@ SyncInstructions SyncLoop::GetSyncInstructions()
 	return sync_instructions;
 }
 
-void SyncLoop::initialize()
-{
-	// preprocess slide keypoints
-	
-	for (unsigned int i = 0; i < slides->size(); i++) {
-		vector<cv::KeyPoint> keypoints;
-		Mat                  descriptors;
-		
-		detector->detectAndCompute((*slides)[i], cv::noArray(), keypoints, descriptors);
-		
-		slide_keypoints  .push_back(keypoints);
-		slide_descriptors.push_back(descriptors);
-	}
-	
-	// match the first frame to find the slides projection or screen in the footage
-	Mat firstframe;
-	
-	// peek the first frame,
-	// processing VideoCapture objects that are not rewindable
-	// is not supported (e.g. realtime camera streams)
-	(*footage) >> firstframe;
-	footage->set(cv::CAP_PROP_POS_FRAMES, 0);
-	
-	cv::cvtColor(firstframe, firstframe, cv::COLOR_BGR2GRAY);
-	
-	vector<cv::KeyPoint> frame_keypoints;
-	Mat                  frame_descriptors;
-	
-	detector->detectAndCompute(firstframe, cv::noArray(), frame_keypoints, frame_descriptors);
-	
-	vector<vector<cv::DMatch>> matches;
-	vector<cv::KeyPoint>       match_slide;
-	vector<cv::KeyPoint>       match_frame;
-	vector<cv::Point2f>        match_slide_pt;
-	vector<cv::Point2f>        match_frame_pt;
-	vector<cv::DMatch>         filtered;
-	
-	matcher->knnMatch(slide_descriptors[0], frame_descriptors, matches, 2);
-	
-	for (unsigned int i = 0, k = 0; i < matches.size(); i++) {
-		if (matches[i][0].distance < max_matchratio * matches[i][1].distance) {
-			match_slide.push_back(slide_keypoints[0][matches[i][0].queryIdx]);
-			match_frame.push_back(frame_keypoints   [matches[i][0].trainIdx]);
-			
-			match_slide_pt.push_back(match_slide[k].pt);
-			match_frame_pt.push_back(match_frame[k].pt);
-			
-			k += 1;
-		}
-	}
-	
-	Mat homography;
-	Mat inliers;
-	
-	if (match_slide.size() > 3) {
-		homography = cv::findHomography(match_slide_pt, match_frame_pt,
-		                                cv::RANSAC, RANSAC_threshold, inliers);
-	}
-	
-	vector<cv::KeyPoint> inliers_slide;
-	vector<cv::KeyPoint> inliers_frame;
-	
-	for (unsigned int i = 0, k = 0; i < match_slide.size(); i++) {
-		if (inliers.at<uchar>(i)) {
-			inliers_slide.push_back(match_slide[i]);
-			inliers_frame.push_back(match_frame[i]);
-			filtered.push_back(cv::DMatch(k, k, 0));
-			k += 1;
-		}
-	}
-	
-	if (homography.empty()) {
-		std::cerr << "Can't find a robust matching" << std::endl;
-		processor = &SyncLoop::idle;
-		
-		return;
-	}
-	
-	double slidewidth  = (*slides)[0].cols;
-	double slideheight = (*slides)[0].rows;
-	
-	Quad slidepose = Quad(         0,           0,
-	                               0, slideheight,
-	                      slidewidth, slideheight,
-	                      slidewidth,           0).Perspective(homography);
-	
-	prev_frame             = firstframe;
-	prev_frame_keypoints   = frame_keypoints;
-	prev_frame_descriptors = frame_descriptors;
-	prev_slidepose         = slidepose;
-	
-	processor = &SyncLoop::idle;
-}
-
-void SyncLoop::track()
-{
-	Mat frame = next_frame();
-	Mat display;
-	
-	if (frame.empty()) {
-		processor = &SyncLoop::idle;
-		return;
-	}
-	
-	cv::cvtColor(frame, display, cv::COLOR_BGR2RGBA);
-	cv::cvtColor(frame, frame, cv::COLOR_BGR2GRAY);
-	
-	canvas->UpdateGL(display);
-	
-	prev_frame = frame;
-}
-
-void SyncLoop::idle()
-{
-}
-
 Mat SyncLoop::next_frame()
 {
 	Mat frame;
@@ -213,5 +101,445 @@ Mat SyncLoop::next_frame()
 	
 	return frame;
 }
+
+/// @brief Generate a mask matrix which is only for pixels inside a Quad
+/// 
+/// @remarks Only valid for convex clockwise Quads
+/// @param[in] image Reference image to generate the mask
+/// @param[in] quad Filled Quad
+/// @returns Mask image
+static Mat quadmask(const Mat& image, const Quad& quad)
+{
+	Mat mask(image.rows, image.cols, CV_8U, cv::Scalar(0));
+	
+	// a convex quad is continuous so calculating the
+	// pixels where it intersects each scanline is
+	// enough to draw it quickly. These vectors will
+	// hold such intersections, then everything in between
+	// should be drawn. Note that the initialization makes
+	// the right edge zero, so nothing will be drawn by default
+	vector<int> leftedges (image.rows, image.cols);
+	vector<int> rightedges(image.rows, 0);
+	
+	std::unique_ptr<cv::LineIterator> lineit;
+	
+	cv::Point vertices[5] = {cv::Point(quad.X1, quad.Y1),
+	                         cv::Point(quad.X2, quad.Y2),
+	                         cv::Point(quad.X3, quad.Y3),
+	                         cv::Point(quad.X4, quad.Y4),
+	                         cv::Point(quad.X1, quad.Y1)};
+	
+	for (unsigned int i = 0; i < 4; i++) {
+		lineit.reset(new cv::LineIterator(image, vertices[i], vertices[i + 1], 4));
+		
+		for (int k = 0; k < lineit->count; k++, ++(*lineit)) {
+			cv::Point pixel = (*lineit).pos();
+			
+			if (pixel.x < leftedges[pixel.y]) {
+				leftedges[pixel.y] = pixel.x;
+			}
+			
+			if (pixel.x + 1 > rightedges[pixel.y]) {
+				rightedges[pixel.y] = pixel.x + 1;
+			}
+		}
+	}
+	
+	for (int i = 0; i < mask.rows; i++) {
+		unsigned char* row = mask.ptr<unsigned char>(i);
+		
+		for (int k = leftedges[i]; k < rightedges[i]; k++) {
+			row[k] = 255;
+		}
+	}
+	
+	return mask;
+}
+
+/// @brief Filter a list of keypoint into those keypoints inside a quad
+/// 
+/// @param[in] keypoints Image keypoints.
+/// @param[in] descriptors Corresponding keypoint descriptors.
+/// @param[in] quad Quad to use as a filter.
+/// @param[out] quad_keypoints Filtered image keypoints, inside the Quad.
+/// @param[out] quad_descriptors Filtered keypoint descriptors, inside the Quad.
+/// @returns Index lookup table m[i] indicating the corresponding index k for each in index i in keypoints,
+///          i.e. keypoints[m[i]] = quad_keypoints[i]. If a keypoint is not inside the quad, it will be marked
+///          with a -1.
+static vector<int> quadfilter(const vector<cv::KeyPoint>& keypoints, const Mat& descriptors,
+                               const Quad& quad, vector<cv::KeyPoint>& quad_keypoints, Mat& quad_descriptors)
+{
+	vector<int> lookup(keypoints.size());
+	
+	quad_keypoints.clear();
+	quad_descriptors = Mat(0, descriptors.cols, descriptors.type());
+	
+	for (unsigned int i = 0, k = 1; i < keypoints.size(); i++) {
+		bool inside = quad.Inside(keypoints[i].pt.x, keypoints[i].pt.y);
+		
+		quad_keypoints.push_back(keypoints[i]);
+		quad_descriptors.push_back(descriptors.row(i));
+		
+		if (inside) {
+			lookup[i] = k;
+			k        += 1;
+		}
+	}
+	
+	return lookup;
+}
+
+/// @brief Calculate the deviation (and deformation) between two Quads
+/// 
+/// @param[in] first First Quad.
+/// @param[in] second Second Quad.
+/// @param[out] deformation Maximum L2(corner displacement) after removing the effect of the deviation.
+/// @returns Deviation: average displacement of the Quad's vertices.
+static double quaddeviation(const Quad& first, const Quad& second, double& deformation)
+{
+	double diff[8] = {second.X1 - first.X1, second.Y1 - first.Y1,
+	                  second.X2 - first.X2, second.Y2 - first.Y2,
+	                  second.X3 - first.X3, second.Y3 - first.Y3,
+	                  second.X4 - first.X4, second.Y4 - first.Y4};
+	
+	double avgdiff[2] = {(diff[0] + diff[2] + diff[4] + diff[6]) / 4,
+	                     (diff[1] + diff[3] + diff[5] + diff[7]) / 4};
+	
+	double maxdeviation2 = std::numeric_limits<double>::infinity();
+	
+	for (unsigned int i = 0; i < 8; i += 2) {
+		double dx = diff[i]     - avgdiff[0];
+		double dy = diff[i + 1] - avgdiff[1];
+		
+		double deviation2 = dx * dx + dy * dy;
+		
+		if (deviation2 > maxdeviation2) {
+			maxdeviation2 = deviation2;
+		}
+	}
+	
+	deformation = std::sqrt(maxdeviation2);
+	
+	return std::sqrt(avgdiff[0] * avgdiff[0] + avgdiff[1] * avgdiff[1]);
+}
+
+// minimal deviation and deformation to consider them errors
+static const int    min_matchsize = 5;
+static const double deviation0    = 5;      // 5 pixels of grace for slow camera movement
+static const double deformation0  = 6 - 1;  // 6 pixels deformation will be as heavy as 1 pixel match error
+                                            // and after that this cost increments faster (heavy deformation
+                                            // is a strong indicator of a wrong slide)
+
+/// @brief Compute the average L1 deviation between matched keypoints
+/// 
+/// @param[in] keypoints1 Keypoints for the first frame.
+/// @param[in] keypoints2 Keypoints for the second frame.
+/// @param[in] matches Matching between the keypoints in the two frames.
+/// @param[in] homography Computed homography relating the frames.
+/// @param[in] slidepose1 Pose of the presentation slide in the first frame.
+/// @param[in] slidepose2 Pose of the presentation slide in the second frame.
+/// @returns Matching cost.
+static double matchcost(const vector<cv::KeyPoint>& keypoints1,
+                        const vector<cv::KeyPoint>& keypoints2,
+                        const vector<cv::DMatch>& matches, const Mat& homography,
+                        const Quad& slidepose1, const Quad& slidepose2)
+{
+	if (matches.size() < min_matchsize) {
+		return std::numeric_limits<double>::infinity();
+	}
+	
+	double deformation;
+	double deviation = quaddeviation(slidepose1, slidepose2, deformation);
+	
+	double deviationcost   = (deviation > deviation0) ? deviation - deviation0 : 0;
+	double deformationcost = (deformation > deformation0) ? (deformation - deformation0) *
+	                                                        (deformation - deformation0) : 0;
+	double matchcost       = 0;
+	
+	for (unsigned int i = 0; i < matches.size(); i++) {
+		cv::Point2f keypoint_f            = keypoints1[matches[i].queryIdx].pt;
+		double      keypoint[3]           = {keypoint_f.x, keypoint_f.y, 1};
+		Mat         keypoint_homogeneous(3, 1, CV_64F, keypoint);
+		Mat         projected_homogeneous = homography * keypoint_homogeneous;
+		
+		double* pjh = projected_homogeneous.ptr<double>();
+		cv::Point2f projected(pjh[0] / pjh[2], pjh[1] / pjh[2]);
+		
+		double dx = projected.x - keypoints2[matches[i].trainIdx].pt.x;
+		double dy = projected.y - keypoints2[matches[i].trainIdx].pt.y;
+		
+		matchcost += std::sqrt(dx * dx + dy * dy);
+	}
+	
+	matchcost /= matches.size();
+	
+	return matchcost + deviationcost + deformationcost;
+}
+
+/// @brief Check if the slide sections of two frames are a good match
+/// 
+/// @param[in] keypoints1 Keypoints for the first frame.
+/// @param[in] keypoints2 Keypoints for the second frame.
+/// @param[in] matches Matching between the keypoints in the first frame and the ones in the second.
+/// @param[in] slidepose1 Slide pose in the first frame.
+/// @param[in] slidepose2 Slide pose in the second frame.
+/// @returns True if the matching is good enough to be considered correct; otherwise, false.
+static bool slidematch(const vector<cv::KeyPoint>& keypoints1, const vector<cv::KeyPoint>& keypoints2,
+                       const vector<cv::DMatch>& matches, const Mat& homography,
+                       const Quad& slidepose1, const Quad& slidepose2)
+{
+	const double min_ratio = 0.1;
+	double ratio1 = matches.size() / keypoints1.size();
+	double ratio2 = matches.size() / keypoints2.size();
+	
+	if (ratio1 < min_ratio) {
+		return false;
+	}
+	
+	if (ratio2 < min_ratio) {
+		return false;
+	}
+	
+	double cost = matchcost(keypoints1, keypoints2,
+	                        matches, homography,
+	                        slidepose1, slidepose2);
+	
+	return cost < 5.0;
+}
+
+vector<cv::DMatch> SyncLoop::match(const Mat& descriptors1, const Mat& descriptors2)
+{
+	vector<vector<cv::DMatch>> matches;
+	vector<cv::DMatch>         bestmatches;
+	
+	matcher->knnMatch(descriptors1, descriptors2, matches, 2);
+	
+	for (unsigned int i = 0; i < matches.size(); i++) {
+		if (matches[i][0].distance < max_matchratio * matches[i][1].distance) {
+			bestmatches.push_back(matches[i][0]);
+		}
+	}
+	
+	return bestmatches;
+}
+
+Mat SyncLoop::refineHomography(const vector<cv::KeyPoint>& keypoints1,
+                               const vector<cv::KeyPoint>& keypoints2,
+                               const vector<cv::DMatch>& matches,
+                               vector<cv::DMatch>& inliers)
+{
+	vector<cv::Point2f> keypoints1_f;
+	vector<cv::Point2f> keypoints2_f;
+	
+	for (unsigned int i = 0; i < matches.size(); i++) {
+		keypoints1_f.push_back(keypoints1[matches[i].queryIdx].pt);
+		keypoints2_f.push_back(keypoints2[matches[i].trainIdx].pt);
+	}
+	
+	Mat homography;
+	Mat inliers_mat;
+	
+	if (keypoints1_f.size() >= min_matchsize) {
+		homography = cv::findHomography(keypoints1_f, keypoints2_f,
+		                                cv::RANSAC, RANSAC_threshold, inliers_mat);
+	}
+	
+	inliers.clear();
+	
+	for (unsigned int i = 0; i < keypoints1_f.size(); i++) {
+		if (inliers_mat.at<uchar>(i)) {
+			inliers.push_back(matches[i]);
+		}
+	}
+	
+	return homography;
+}
+
+void SyncLoop::initialize()
+{
+	// preprocess slide keypoints
+	
+	for (unsigned int i = 0; i < slides->size(); i++) {
+		vector<cv::KeyPoint> keypoints;
+		Mat                  descriptors;
+		
+		detector->detectAndCompute((*slides)[i], cv::noArray(), keypoints, descriptors);
+		
+		slide_keypoints  .push_back(keypoints);
+		slide_descriptors.push_back(descriptors);
+	}
+	
+	// match the first frame to find the slides projection or screen in the footage
+	
+	Mat firstframe;
+	
+	// peek the first frame,
+	// processing VideoCapture objects that are not rewindable
+	// is not supported (e.g. realtime camera streams)
+	(*footage) >> firstframe;
+	footage->set(cv::CAP_PROP_POS_FRAMES, 0);
+	
+	cv::cvtColor(firstframe, firstframe, cv::COLOR_BGR2GRAY);
+	
+	vector<cv::KeyPoint> frame_keypoints;
+	Mat                  frame_descriptors;
+	
+	detector->detectAndCompute(firstframe, cv::noArray(), frame_keypoints, frame_descriptors);
+	
+	vector<cv::DMatch> matches = match(slide_descriptors[0], frame_descriptors);
+	vector<cv::DMatch> filtered;
+	
+	Mat homography = refineHomography(slide_keypoints[0], frame_keypoints, matches, filtered);
+	
+	if (homography.empty()) {
+		std::cerr << "Can't find a robust matching" << std::endl;
+		processor = &SyncLoop::idle;
+		
+		return;
+	}
+	
+	// locate the presentation in the footage frame
+	
+	double slidewidth  = (*slides)[0].cols;
+	double slideheight = (*slides)[0].rows;
+	
+	Quad slidepose = Quad(         0,           0,
+	                               0, slideheight,
+	                      slidewidth, slideheight,
+	                      slidewidth,           0).Perspective(homography);
+	
+	ref_frame             = firstframe;
+	ref_frame_keypoints   = frame_keypoints;
+	ref_frame_descriptors = frame_descriptors;
+	ref_slidepose         = slidepose;
+	ref_quad_indices      = quadfilter(frame_keypoints, frame_descriptors, slidepose,
+	                                   ref_quad_keypoints, ref_quad_descriptors);
+	
+	processor = &SyncLoop::track;
+}
+
+void SyncLoop::track()
+{
+	Mat  frame     = next_frame();
+	Quad slidepose = ref_slidepose;  // approximate the current Quad with the reference one, which should be
+	                                 // close, and therefore, have most of the slide keypoints inside; if it
+	                                 // turns out the real one is too far away from the reference one, the
+	                                 // reference will be updated to point to this one to reduce future errors
+	Mat  display;
+	bool make_keyframe = false;
+	
+	if (frame.empty()) {
+		processor = &SyncLoop::idle;
+		return;
+	}
+	
+	cv::cvtColor(frame, display, cv::COLOR_BGR2RGBA);
+	cv::cvtColor(frame, frame,   cv::COLOR_BGR2GRAY);
+	
+	vector<cv::KeyPoint> frame_keypoints;
+	Mat                  frame_descriptors;
+	
+	detector->detectAndCompute(frame, cv::noArray(), frame_keypoints, frame_descriptors);
+	
+	vector<cv::DMatch> matches   = match(ref_frame_descriptors, frame_descriptors);
+	vector<cv::DMatch> filtered;
+	
+	Mat homography = refineHomography(ref_frame_keypoints, frame_keypoints, matches, filtered);
+	slidepose      = ref_slidepose.Perspective(homography);
+	
+	vector<cv::KeyPoint> quad_keypoints;
+	Mat                  quad_descriptors;
+	vector<cv::DMatch>   quad_matches;
+	
+	vector<int> quad_indices = quadfilter(frame_keypoints, frame_descriptors, slidepose,
+	                                      quad_keypoints, quad_descriptors);
+	
+	for (unsigned int i = 0; i < matches.size(); i++) {
+		int index1 = ref_quad_indices[matches[i].queryIdx];
+		int index2 = quad_indices[matches[i].trainIdx];
+		if (index1 >= 0 && index2 >= 0) {
+			quad_matches.push_back(cv::DMatch(index1, index2, matches[i].distance));
+		}
+	}
+	
+	if (homography.empty() ||
+	    !slidematch(ref_quad_keypoints, quad_keypoints,
+	                quad_matches, homography, ref_slidepose, slidepose)) {
+		// the match is weak, check if other slides work better
+		
+		std::cout << "Hard frame" << std::endl;
+		
+		unsigned int         candidate_indices[5] = {slide_index, slide_index + 1, slide_index - 1,
+		                                             slide_index + 2, slide_index - 2};
+		vector<unsigned int> candidates;
+		
+		unsigned int         bestslide      = slide_index;
+		Mat                  besthomography;
+		vector<cv::DMatch>   bestmatches;
+		Quad                 bestslidepose;
+		double               bestcost       = std::numeric_limits<double>::infinity();
+		
+		double slidewidth  = (*slides)[bestslide].cols;
+		double slideheight = (*slides)[bestslide].rows;
+		
+		for (unsigned int i = 0; i < 4; i++) {
+			if (candidate_indices[i] >= 0 && candidate_indices[i] < slides->size()) {
+				candidates.push_back(candidate_indices[i]);
+			}
+		}
+		
+		for (unsigned int i = 0; i < candidates.size(); i++) {
+			matches    = match           (slide_descriptors[candidates[i]], quad_descriptors);
+			homography = refineHomography(slide_keypoints  [candidates[i]], quad_keypoints,
+			                              matches, filtered);
+			
+			slidepose = Quad(         0,           0,
+			                          0, slideheight,
+			                 slidewidth, slideheight,
+			                 slidewidth,           0).Perspective(homography);
+			
+			double cost = matchcost(slide_keypoints[candidates[i]], quad_keypoints,
+			                        filtered, homography, ref_slidepose, slidepose);
+			
+			if (cost < bestcost) {
+				bestslide      = candidates[i];
+				besthomography = homography;
+				bestmatches    = matches;
+				bestcost       = cost;
+			}
+		}
+		
+		if (bestcost > 100) {
+			// this frame is too bad, skip it and hope the next one is better
+			return;
+		}
+	
+		slidepose = Quad(         0,           0,
+		                          0, slideheight,
+		                 slidewidth, slideheight,
+		                 slidewidth,           0).Perspective(besthomography);
+		
+		// update reference frame
+		
+		if (bestslide != slide_index) {
+			make_keyframe = true;
+		}
+	}
+	
+	canvas->UpdateGL(display);
+	
+	if (make_keyframe) {
+		ref_frame             = frame;
+		ref_frame_keypoints   = frame_keypoints;
+		ref_frame_descriptors = frame_descriptors;
+		ref_slidepose         = slidepose;
+		ref_quad_indices      = quadfilter(frame_keypoints, frame_descriptors, slidepose,
+		                                   ref_quad_keypoints, ref_quad_descriptors);
+	}
+}
+
+void SyncLoop::idle()
+{
+} 
 
 }

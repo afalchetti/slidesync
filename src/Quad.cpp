@@ -30,18 +30,21 @@ namespace slidesync
 {
 
 Quad::Quad()
-	: X1(0), Y1(0), X2(0), Y2(0), X3(0), Y3(0), X4(0), Y4(0) {}
+	: X1(0), Y1(0), X2(0), Y2(0), X3(0), Y3(0), X4(0), Y4(0),
+	  nx1(0), ny1(0), nx2(0), ny2(0), nx3(0), ny3(0), nx4(0), ny4(0) {}
 
 Quad::Quad(double x1, double y1, double x2, double y2, double x3, double y3, double x4, double y4)
-	: X1(x1), Y1(y1), X2(x2), Y2(y2), X3(x3), Y3(y3), X4(x4), Y4(y4) {}
+	: X1(x1), Y1(y1), X2(x2), Y2(y2), X3(x3), Y3(y3), X4(x4), Y4(y4),
+	  nx1(y2 - y1), ny1(x1 - x2), nx2(y3 - y2), ny2(x2 - x3),
+	  nx3(y4 - y3), ny3(x3 - x4), nx4(y1 - y4), ny4(x4 - x1) {}
 
-Quad Quad::Perspective(Mat homography)
+Quad Quad::Perspective(Mat homography) const
 {
 	double quad[12] = { X1,  X2,  X3,  X4,
 	                    Y1,  Y2,  Y3,  Y4,
 	                   1.0, 1.0, 1.0, 1.0};
 	
-	Mat quadmat(3, 4, CV_64F, &quad);
+	Mat quadmat(3, 4, CV_64F, quad);
 	
 	Mat     transformed = homography * quadmat;
 	double* tf          = transformed.ptr<double>();
@@ -52,7 +55,16 @@ Quad Quad::Perspective(Mat homography)
 	            tf[3]/tf[11], tf[7]/tf[11]);
 }
 
-string Quad::ToString()
+bool Quad::Inside(double x, double y) const
+{
+	// the dot product with every edge normal should be non-negative
+	return (x * nx1 + y * ny1 >= 0) &&
+	       (x * nx2 + y * ny2 >= 0) &&
+	       (x * nx3 + y * ny3 >= 0) &&
+	       (x * nx4 + y * ny4 >= 0);
+}
+
+string Quad::ToString() const
 {
 	return "[(" + std::to_string(X1) + ", " + std::to_string(Y1) + "); "
 	        "(" + std::to_string(X2) + ", " + std::to_string(Y2) + "); "

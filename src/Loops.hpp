@@ -92,7 +92,7 @@ private:
 	std::vector<Mat>* slides;
 	
 	/// @brief Slide index
-	int slide_index;
+	unsigned int slide_index;
 	
 	/// @brief Keypoint detector
 	cv::Ptr<cv::Feature2D> detector;
@@ -106,20 +106,32 @@ private:
 	/// @brief Precomputed keypoint descriptors for each slide
 	std::vector<Mat> slide_descriptors;
 	
-	/// @brief Previous frame (for differential processing)
-	Mat prev_frame;
+	/// @brief Reference frame (for differential processing)
+	Mat ref_frame;
 	
-	/// @brief Previously computed keypoints for the previous frame
-	std::vector<cv::KeyPoint> prev_frame_keypoints;
+	/// @brief Previously computed keypoints for the reference frame
+	std::vector<cv::KeyPoint> ref_frame_keypoints;
 	
-	/// @brief Previously computed keypoint descriptors for the previous frame
-	Mat prev_frame_descriptors;
+	/// @brief Previously computed keypoint descriptors for the reference frame
+	Mat ref_frame_descriptors;
 	
-	/// @brief Description of the slide pose in the previous frame
+	/// @brief Subset of ref_frame_keypoints but only containing the keypoints inside the ref_slidepose Quad
+	std::vector<cv::KeyPoint> ref_quad_keypoints;
+	
+	/// @brief Subset of ref_frame_descriptors but only containing the keypoints inside the ref_slidepose Quad
+	Mat ref_quad_descriptors;
+	
+	/// @brief Index lookup table, indicating the index in ref_quad_keypoints for every element
+	///        in ref_frame_keypoints
+	/// 
+	/// A value of -1 indicates the particular keypoint is not inside the presentation Quad.
+	std::vector<int> ref_quad_indices;
+	
+	/// @brief Description of the slide pose in the reference frame
 	/// 
 	/// The quad's vertices can be outside the frame region, since the slides
 	/// could be out-of-frame.
-	Quad prev_slidepose;
+	Quad ref_slidepose;
 	
 	/// @brief Synchronization instructions to match the slides with the footage
 	SyncInstructions sync_instructions;
@@ -153,6 +165,26 @@ public:
 	SyncInstructions GetSyncInstructions();
 	
 private:
+	/// @brief Get the next frame on the footage
+	Mat next_frame();
+	
+	/// @brief Compute a matching between two images given their keypoints
+	/// 
+	/// @param[in] descriptors1 Corresponding descriptors in the first image
+	/// @param[in] descriptors2 Corresponding descriptors in the second image
+	/// @returns Matching keypoints
+	std::vector<cv::DMatch> match(const Mat& descriptors1, const Mat& descriptors2);
+	
+	/// @brief Refine a matching using RANSAC and get an appropriate homography matrix
+	/// 
+	/// @param[in] keypoints1 Matching keypoints in the first image
+	/// @param[in] keypoints2 Corresponding matching keypoints in the second image
+	/// @param[in] matches Original matching keypoints
+	/// @param[out] inliers Filtered matching keypoints, after RANSAC
+	/// @returns Homography matrix
+	Mat refineHomography(const std::vector<cv::KeyPoint>& keypoints1, const std::vector<cv::KeyPoint>& keypoints2,
+	                     const std::vector<cv::DMatch>& matches, std::vector<cv::DMatch>& inliers);
+	
 	/// @brief First processing stage. Initializes the required internal resources
 	/// 
 	/// Pre-processes the slide images and matches them to the first frame.
@@ -169,9 +201,6 @@ private:
 	/// Usually entered when the work has finished or
 	/// an error won't allow further processing.
 	void idle();
-	
-	/// @brief Get the next frame on the footage
-	Mat next_frame();
 };
 
 }
