@@ -114,12 +114,11 @@ public:
 	/// @brief True if the specified point lies within the region defined by the Quad
 	/// 
 	/// @remarks This operation is only well-behaved for convex clockwise Quads.
-	///          If the Quad is counterclockwise, the returned value will be inverted, i.e.
-	///          it will return true if the point is outside the quad; if it is not convex,
-	///          the result will be arbitrary (but it will not raise undefined behaviour in
-	///          the language), i.e. there will be a region in space where this function
-	///          returns true, but it may have nothing to do with the mathematical definition
-	///          of the Quad and it may not even have properties such as continuity.
+	///          If it is not convex or clockwise, the result will be arbitrary (but it
+	///          will not raise undefined behaviour in the language), i.e. there will be
+	///          a region in space where this function returns true, but it may have
+	///          nothing to do with the mathematical definition of the Quad and it may
+	///          not even have nice properties such as continuity.
 	/// 
 	/// @param[in] x First coordinate of the point
 	/// @param[in] y Second coordinate of the point

@@ -24,205 +24,13 @@
 #include <ios>
 
 #include "SyncInstructions.hpp"
+#include "util.hpp"
 
 namespace slidesync
 {
 
 enum {SYNC_NEXT     = -1,
       SYNC_PREVIOUS = -2};
-
-/// @brief std::istream skip-literal target
-/// 
-/// This structure can be used to skip a literal string from a stream
-/// and check that indeed it was present. So,
-/// 
-///     int x, y;
-///     istringstream reader("2 / 3");
-///     reader >> x >> skip("/") >> y;
-/// 
-/// will set x to 2 and y 3, whilst
-/// 
-///     int x, y;
-///     istringstream reader("2 + 3");
-///     reader >> x >> skip("/") >> y;
-/// 
-/// will fail as istreams usually do with mismatched input.
-/// 
-/// @remarks Similarly to other read outputs, leading whitespace will be
-///          disregarded if reader.skipws is set.
-struct skip
-{
-	/// @brief Leading whitespace in the literal string to skip
-	string literalws;
-	
-	/// @brief Literal string to skip, after removing the leading whitespace
-	string literalword;
-	
-	/// @brief Construct a skip-literal target
-	/// 
-	/// @param[in] literal String to skip
-	skip(string literal)
-		: literalws(), literalword()
-	{
-		unsigned int wordstart = 0;
-		
-		for (; wordstart < literal.length(); wordstart++) {
-			if (!std::isspace(literal[wordstart])) {
-				break;
-			}
-		}
-		
-		literalws   = literal.substr(0, wordstart);
-		literalword = literal.substr(wordstart);
-	}
-};
-
-/// @brief Skip an expected string literal
-/// 
-/// @param[in] stream Input stream.
-/// @param[in] toskip String literal to skip.
-std::istream& operator>>(std::istream& stream, const skip& toskip) {
-	bool skipws = stream.skipws;
-	stream >> std::noskipws;
-	
-	string remaining;
-	
-	if (stream.skipws) {
-		string streamws  = "";
-		
-		while (std::isspace(stream.peek())) {
-			streamws += stream.get();
-		}
-		
-		if (streamws.length() < toskip.literalws.length() ||
-		    streamws.compare(streamws.length() - toskip.literalws.length(),
-		                     streamws.npos, toskip.literalws) != 0) {
-			stream.setstate(stream.failbit);
-			
-			if (stream.exceptions() & stream.failbit) {
-				throw std::ios_base::failure("Literal leading whitespace not found");
-			}
-		}
-		
-		remaining = toskip.literalword;
-	}
-	else {
-		remaining = toskip.literalws + toskip.literalword;
-	}
-	
-	for (unsigned int i = 0; i < remaining.length(); i++) {
-		char c = stream.peek();
-		
-		if (c != remaining[i]) {
-			stream.setstate(stream.failbit);
-			
-			if (stream.exceptions() & stream.failbit) {
-				
-				throw std::ios_base::failure("Literal mismatch. Found '" +
-				                             ((c == std::char_traits<char>::eof()) ? string("EOF") :
-				                                                                     string(1, c)) +
-				                             "' but expected '" + remaining[i] + "'");
-			}
-		}
-		
-		stream.get();
-	}
-	
-	stream >> skipws;
-	return stream;
-}
-
-/// @brief Prepend a character to a string until it has a given size
-/// 
-/// @param[in] text Input string.
-/// @param[in] fill Filler character.
-/// @param[in] size Desired string length.
-/// @returns Padded string.
-string pad(string text, char fill, unsigned int size)
-{
-	unsigned int nfill = size - text.length();
-	
-	if (nfill < 0) {
-		nfill = 0;
-	}
-	
-	return string(nfill, fill).append(text);
-}
-
-/// @brief Calculate the number of chars needed to write the number in decimal base
-/// 
-/// @param[in] x Written number.
-unsigned int nchars(unsigned int x)
-{
-	if (x == 0) {
-		return 1;
-	}
-	
-	unsigned int nchars = 0;
-	unsigned int power  = 1;
-	
-	while (x >= power) {
-		power *= 10;
-		nchars++;
-	}
-	
-	return nchars;
-}
-
-/// @brief Get a timestamp representation (hours:minutes:seconds.frame) of a frame index
-/// 
-/// @param[in] index Frame index.
-/// @param[in] framerate Footage frame rate.
-/// @returns String representation.
-string index2timestamp(unsigned int index, unsigned int framerate)
-{
-	if (framerate == 0) {
-		return "";
-	}
-	
-	unsigned int frames       = index % framerate;
-	unsigned int totalseconds = index / framerate;
-	
-	unsigned int seconds      = totalseconds % 60;
-	unsigned int totalminutes = totalseconds / 60;
-	
-	unsigned int minutes = totalminutes % 60;
-	unsigned int hours   = totalminutes / 60;
-	
-	return pad(std::to_string(hours),   '0', 2) + ":" +
-	       pad(std::to_string(minutes), '0', 2) + ":" +
-	       pad(std::to_string(seconds), '0', 2) + "." +
-	       pad(std::to_string(frames),  '0', nchars(framerate));
-}
-
-/// @brief Get a frame index from its timestamp representation (hours:minutes:seconds.frame) 
-/// 
-/// @param[in] timestamp Timestamp string following the format "HH:mm:ss.FF", where
-///                      HH is hours, mm is minutes, ss is seconds and FF is frame.
-///                      Note that this timestamp is almost but not the same as the
-///                      real time that has passed since the start of the footage;
-///                      e.g. the framerate is usually 23.976 Hz but counted as
-///                      24 frames per second.
-/// @param[in] framerate Footage frame rate.
-/// @returns Frame index.
-int timestamp2index(string timestamp, unsigned int framerate)
-{
-	std::istringstream reader(timestamp);
-	reader.exceptions(reader.failbit);
-	
-	unsigned int hours;
-	unsigned int minutes;
-	unsigned int seconds;
-	unsigned int frames;
-	
-	// noskipws because otherwise it would be madness, e.g. "23:    12  : 24.  \t\n 16"
-	// also, the compact format forces a constant timestamp length which simplifies memory allocation
-	// (for any given framerate and reasonable number of hours, i.e. please don't process 100+ hour
-	// dissertation videos, I'm sure people will bail before hour 32)
-	reader >> std::noskipws >> hours >> skip(":") >> minutes >> skip(":") >> seconds >> skip(".") >> frames;
-	
-	return ((hours * 60 + minutes) * 60 + seconds) * framerate + frames;
-}
 
 SyncInstructions::SyncInstructions(unsigned int length)
 	: instructions(), framerate(0), current_index(0), length(length) {}
@@ -238,13 +46,13 @@ SyncInstructions::SyncInstructions(string descriptor)
 	
 	reader.exceptions(reader.failbit);
 	
-	reader >> skip("nslides")       >> skip("=") >> length        >> skip("\n");
-	reader >> skip("framerate")     >> skip("=") >> framerate     >> skip("\n");
-	reader >> skip("ninstructions") >> skip("=") >> ninstructions >> skip("\n");
+	reader >> Skip("nslides")       >> Skip("=") >> length        >> Skip("\n");
+	reader >> Skip("framerate")     >> Skip("=") >> framerate     >> Skip("\n");
+	reader >> Skip("ninstructions") >> Skip("=") >> ninstructions >> Skip("\n");
 	
 	for (unsigned int i = 0; i < ninstructions; i++) {
-		reader >> skip("[");
-		reader >> skip("");
+		reader >> Skip("[");
+		reader >> Skip("");
 		// skipping the empty string will force the reader to discard any whitespace
 		// this is to make the format symmetrical; otherwise "[123 ]" would be allowed, but "[ 123]" would not
 		// and between allowing the left space and forbidding the right one, the lenient first option is
@@ -272,7 +80,7 @@ SyncInstructions::SyncInstructions(string descriptor)
 			index = -index;
 		}
 		
-		reader >> skip("]") >> skip(":");
+		reader >> Skip("]") >> Skip(":");
 		
 		string instruction_str;
 		std::getline(reader, instruction_str, '\n');

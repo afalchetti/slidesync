@@ -32,6 +32,7 @@
 
 #include "CVCanvas.hpp"
 #include "Loops.hpp"
+#include "util.hpp"
 
 using std::vector;
 using std::string;
@@ -169,24 +170,41 @@ static Mat quadmask(const Mat& image, const Quad& quad)
 static vector<int> quadfilter(const vector<cv::KeyPoint>& keypoints, const Mat& descriptors,
                                const Quad& quad, vector<cv::KeyPoint>& quad_keypoints, Mat& quad_descriptors)
 {
-	vector<int> lookup(keypoints.size());
+	vector<int> lookup(keypoints.size(), -1);
 	
 	quad_keypoints.clear();
 	quad_descriptors = Mat(0, descriptors.cols, descriptors.type());
 	
-	for (unsigned int i = 0, k = 1; i < keypoints.size(); i++) {
+	for (unsigned int i = 0, k = 0; i < keypoints.size(); i++) {
 		bool inside = quad.Inside(keypoints[i].pt.x, keypoints[i].pt.y);
 		
-		quad_keypoints.push_back(keypoints[i]);
-		quad_descriptors.push_back(descriptors.row(i));
 		
 		if (inside) {
+			quad_keypoints.push_back(keypoints[i]);
+			quad_descriptors.push_back(descriptors.row(i));
+			
 			lookup[i] = k;
 			k        += 1;
 		}
 	}
 	
 	return lookup;
+}
+
+/// @brief Robust version of Quad perspective which can handle degenerate cases. In particular,
+///        if the homography matrix is empty, it will be replaced with one which sinks the Quad
+///        into the origin
+/// 
+/// @param[in] quad Quad to transform.
+/// @param[in] homography Perspective homography matrix, possibly empty.
+/// @returns Transformed Quad.
+static Quad quadperspective(const Quad& quad, const Mat& homography)
+{
+	if (homography.empty()) {
+		return Quad();
+	}
+	
+	return quad.Perspective(homography);
 }
 
 /// @brief Calculate the deviation (and deformation) between two Quads
@@ -205,7 +223,7 @@ static double quaddeviation(const Quad& first, const Quad& second, double& defor
 	double avgdiff[2] = {(diff[0] + diff[2] + diff[4] + diff[6]) / 4,
 	                     (diff[1] + diff[3] + diff[5] + diff[7]) / 4};
 	
-	double maxdeviation2 = std::numeric_limits<double>::infinity();
+	double maxdeviation2 = 0;
 	
 	for (unsigned int i = 0; i < 8; i += 2) {
 		double dx = diff[i]     - avgdiff[0];
@@ -223,12 +241,11 @@ static double quaddeviation(const Quad& first, const Quad& second, double& defor
 	return std::sqrt(avgdiff[0] * avgdiff[0] + avgdiff[1] * avgdiff[1]);
 }
 
-// minimal deviation and deformation to consider them errors
-static const int    min_matchsize = 5;
-static const double deviation0    = 5;      // 5 pixels of grace for slow camera movement
-static const double deformation0  = 6 - 1;  // 6 pixels deformation will be as heavy as 1 pixel match error
-                                            // and after that this cost increments faster (heavy deformation
-                                            // is a strong indicator of a wrong slide)
+/// @brief Minimum number of matches to consider a matching good
+static const int min_matchsize = 5;
+
+/// @brief Number of matches that is good enough regardless of the percentage of the total keypoints they are
+static const int great_matchsize = 20;
 
 /// @brief Compute the average L1 deviation between matched keypoints
 /// 
@@ -244,6 +261,12 @@ static double matchcost(const vector<cv::KeyPoint>& keypoints1,
                         const vector<cv::DMatch>& matches, const Mat& homography,
                         const Quad& slidepose1, const Quad& slidepose2)
 {
+	// minimal deviation and deformation to consider them errors
+	const double deviation0    = 5;      // 5 pixels of grace for slow camera movement
+	const double deformation0  = 6 - 1;  // 6 pixels deformation will be as heavy as 1 pixel match error
+	                                     // and after that this cost increments faster (heavy deformation
+	                                     // is a strong indicator of a wrong slide)
+	
 	if (matches.size() < min_matchsize) {
 		return std::numeric_limits<double>::infinity();
 	}
@@ -255,6 +278,7 @@ static double matchcost(const vector<cv::KeyPoint>& keypoints1,
 	double deformationcost = (deformation > deformation0) ? (deformation - deformation0) *
 	                                                        (deformation - deformation0) : 0;
 	double matchcost       = 0;
+	int    matchsize       = matches.size();
 	
 	for (unsigned int i = 0; i < matches.size(); i++) {
 		cv::Point2f keypoint_f            = keypoints1[matches[i].queryIdx].pt;
@@ -268,10 +292,22 @@ static double matchcost(const vector<cv::KeyPoint>& keypoints1,
 		double dx = projected.x - keypoints2[matches[i].trainIdx].pt.x;
 		double dy = projected.y - keypoints2[matches[i].trainIdx].pt.y;
 		
-		matchcost += std::sqrt(dx * dx + dy * dy);
+		double cost = std::sqrt(dx * dx + dy * dy);
+		
+		if (!std::isnan(cost)) {
+			matchcost += cost;
+		}
+		else {
+			matchsize -= 1;
+		}
 	}
 	
-	matchcost /= matches.size();
+	// some of the matches could be NaNs, so we must check again for match size
+	if (matchsize < min_matchsize) {
+		return std::numeric_limits<double>::infinity();
+	}
+	
+	matchcost /= matchsize;
 	
 	return matchcost + deviationcost + deformationcost;
 }
@@ -288,15 +324,16 @@ static bool slidematch(const vector<cv::KeyPoint>& keypoints1, const vector<cv::
                        const vector<cv::DMatch>& matches, const Mat& homography,
                        const Quad& slidepose1, const Quad& slidepose2)
 {
-	const double min_ratio = 0.1;
-	double ratio1 = matches.size() / keypoints1.size();
-	double ratio2 = matches.size() / keypoints2.size();
 	
-	if (ratio1 < min_ratio) {
+	if (matches.size() < min_matchsize) {
 		return false;
 	}
 	
-	if (ratio2 < min_ratio) {
+	const double min_ratio   = 0.1;
+	double ratio1 = ((double) matches.size()) / keypoints1.size();
+	double ratio2 = ((double) matches.size()) / keypoints2.size();
+	
+	if (homography.empty() || (matches.size() < great_matchsize && (ratio1 < min_ratio || ratio2 < min_ratio))) {
 		return false;
 	}
 	
@@ -304,13 +341,17 @@ static bool slidematch(const vector<cv::KeyPoint>& keypoints1, const vector<cv::
 	                        matches, homography,
 	                        slidepose1, slidepose2);
 	
-	return cost < 5.0;
+	return cost < 20.0;
 }
 
 vector<cv::DMatch> SyncLoop::match(const Mat& descriptors1, const Mat& descriptors2)
 {
 	vector<vector<cv::DMatch>> matches;
 	vector<cv::DMatch>         bestmatches;
+	
+	if (descriptors1.rows < 2 || descriptors2.rows < 2) {
+		return bestmatches;
+	}
 	
 	matcher->knnMatch(descriptors1, descriptors2, matches, 2);
 	
@@ -338,17 +379,16 @@ Mat SyncLoop::refineHomography(const vector<cv::KeyPoint>& keypoints1,
 	
 	Mat homography;
 	Mat inliers_mat;
+	inliers.clear();
 	
 	if (keypoints1_f.size() >= min_matchsize) {
 		homography = cv::findHomography(keypoints1_f, keypoints2_f,
 		                                cv::RANSAC, RANSAC_threshold, inliers_mat);
-	}
-	
-	inliers.clear();
-	
-	for (unsigned int i = 0; i < keypoints1_f.size(); i++) {
-		if (inliers_mat.at<uchar>(i)) {
-			inliers.push_back(matches[i]);
+		
+		for (unsigned int i = 0; i < keypoints1_f.size(); i++) {
+			if (inliers_mat.at<uchar>(i)) {
+				inliers.push_back(matches[i]);
+			}
 		}
 	}
 	
@@ -403,10 +443,25 @@ void SyncLoop::initialize()
 	double slidewidth  = (*slides)[0].cols;
 	double slideheight = (*slides)[0].rows;
 	
-	Quad slidepose = Quad(         0,           0,
-	                               0, slideheight,
-	                      slidewidth, slideheight,
-	                      slidewidth,           0).Perspective(homography);
+	Quad slidepose = quadperspective(Quad(         0,           0,
+	                                               0, slideheight,
+	                                      slidewidth, slideheight,
+	                                      slidewidth,           0), homography);
+	
+	// DEBUG The next section is only for visual inspection purposes, it is not executed in production
+	Mat display;
+	
+	cv::drawMatches((*slides)[0], slide_keypoints[0], firstframe, frame_keypoints, filtered,
+	                display, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
+	
+	double width = footage->get(cv::CAP_PROP_FRAME_WIDTH);
+	
+	cv::line(display, cv::Point(slidepose.X1 + width, slidepose.Y1), cv::Point(slidepose.X2 + width, slidepose.Y2), cv::Scalar(125, 255, 42));
+	cv::line(display, cv::Point(slidepose.X2 + width, slidepose.Y2), cv::Point(slidepose.X3 + width, slidepose.Y3), cv::Scalar(125, 255, 42));
+	cv::line(display, cv::Point(slidepose.X3 + width, slidepose.Y3), cv::Point(slidepose.X4 + width, slidepose.Y4), cv::Scalar(125, 255, 42));
+	cv::line(display, cv::Point(slidepose.X4 + width, slidepose.Y4), cv::Point(slidepose.X1 + width, slidepose.Y1), cv::Scalar(125, 255, 42));
+	//cv::imwrite("display_init.png", display);
+	// END DEBUG
 	
 	ref_frame             = firstframe;
 	ref_frame_keypoints   = frame_keypoints;
@@ -420,6 +475,10 @@ void SyncLoop::initialize()
 
 void SyncLoop::track()
 {
+	std::cout << "Frame " << coarse_index << " (" << frame_index << " / "
+	                                              << index2timestamp(frame_index, 24) << ") "
+	             "-- Slide " << (slide_index + 1) << ":" << std::endl;
+	
 	Mat  frame     = next_frame();
 	Quad slidepose = ref_slidepose;  // approximate the current Quad with the reference one, which should be
 	                                 // close, and therefore, have most of the slide keypoints inside; if it
@@ -445,7 +504,7 @@ void SyncLoop::track()
 	vector<cv::DMatch> filtered;
 	
 	Mat homography = refineHomography(ref_frame_keypoints, frame_keypoints, matches, filtered);
-	slidepose      = ref_slidepose.Perspective(homography);
+	slidepose      = quadperspective(ref_slidepose, homography);
 	
 	vector<cv::KeyPoint> quad_keypoints;
 	Mat                  quad_descriptors;
@@ -455,29 +514,30 @@ void SyncLoop::track()
 	                                      quad_keypoints, quad_descriptors);
 	
 	for (unsigned int i = 0; i < matches.size(); i++) {
-		int index1 = ref_quad_indices[matches[i].queryIdx];
-		int index2 = quad_indices[matches[i].trainIdx];
-		if (index1 >= 0 && index2 >= 0) {
-			quad_matches.push_back(cv::DMatch(index1, index2, matches[i].distance));
+		int ref_index  = ref_quad_indices[matches[i].queryIdx];
+		int quad_index = quad_indices    [matches[i].trainIdx];
+		if (ref_index >= 0 && quad_index >= 0) {
+			quad_matches.push_back(cv::DMatch(ref_index, quad_index, matches[i].distance));
 		}
 	}
 	
+	unsigned int new_slide_index = slide_index;
+	
 	if (homography.empty() ||
 	    !slidematch(ref_quad_keypoints, quad_keypoints,
-	                quad_matches, homography, ref_slidepose, slidepose)) {
+	                quad_matches, homography,
+	                ref_slidepose, slidepose)) {
 		// the match is weak, check if other slides work better
-		
-		std::cout << "Hard frame" << std::endl;
 		
 		unsigned int         candidate_indices[5] = {slide_index, slide_index + 1, slide_index - 1,
 		                                             slide_index + 2, slide_index - 2};
 		vector<unsigned int> candidates;
 		
-		unsigned int         bestslide      = slide_index;
+		unsigned int         bestslide = slide_index;
 		Mat                  besthomography;
 		vector<cv::DMatch>   bestmatches;
 		Quad                 bestslidepose;
-		double               bestcost       = std::numeric_limits<double>::infinity();
+		double               bestcost = std::numeric_limits<double>::infinity();
 		
 		double slidewidth  = (*slides)[bestslide].cols;
 		double slideheight = (*slides)[bestslide].rows;
@@ -493,42 +553,77 @@ void SyncLoop::track()
 			homography = refineHomography(slide_keypoints  [candidates[i]], quad_keypoints,
 			                              matches, filtered);
 			
-			slidepose = Quad(         0,           0,
-			                          0, slideheight,
-			                 slidewidth, slideheight,
-			                 slidewidth,           0).Perspective(homography);
+			slidepose = quadperspective(Quad(         0,           0,
+			                                          0, slideheight,
+			                                 slidewidth, slideheight,
+			                                 slidewidth,           0), homography);
 			
 			double cost = matchcost(slide_keypoints[candidates[i]], quad_keypoints,
 			                        filtered, homography, ref_slidepose, slidepose);
 			
 			if (cost < bestcost) {
 				bestslide      = candidates[i];
+				bestslidepose  = slidepose;
 				besthomography = homography;
-				bestmatches    = matches;
+				bestmatches    = filtered;
 				bestcost       = cost;
 			}
 		}
-		
-		if (bestcost > 100) {
-			// this frame is too bad, skip it and hope the next one is better
-			return;
-		}
-	
-		slidepose = Quad(         0,           0,
-		                          0, slideheight,
-		                 slidewidth, slideheight,
-		                 slidewidth,           0).Perspective(besthomography);
 		
 		// update reference frame
 		
 		if (bestslide != slide_index) {
 			make_keyframe = true;
 		}
+		
+		cv::Scalar linecolor;
+		
+		if (bestcost < 1000) {
+			new_slide_index = bestslide;
+			slidepose       = bestslidepose;
+			linecolor       = cv::Scalar(125, 255, 42, 255);
+		}
+		else {
+			// this frame is too bad, skip it and hope the next one is better
+			linecolor     = cv::Scalar(255, 125, 42, 255);
+			make_keyframe = false;
+		}
+		
+		//DEBUG
+		
+		// TODO make these HUDs interactive so the user can edit them if necessary
+		cv::line(display, cv::Point(bestslidepose.X1, bestslidepose.Y1), cv::Point(bestslidepose.X2, bestslidepose.Y2), linecolor);
+		cv::line(display, cv::Point(bestslidepose.X2, bestslidepose.Y2), cv::Point(bestslidepose.X3, bestslidepose.Y3), linecolor);
+		cv::line(display, cv::Point(bestslidepose.X3, bestslidepose.Y3), cv::Point(bestslidepose.X4, bestslidepose.Y4), linecolor);
+		cv::line(display, cv::Point(bestslidepose.X4, bestslidepose.Y4), cv::Point(bestslidepose.X1, bestslidepose.Y1), linecolor);
+		//cv::imwrite("displayX.png", display2);
+		
+		Mat display2;
+		
+		cv::drawMatches((*slides)[bestslide], slide_keypoints[bestslide], frame, quad_keypoints,
+		                bestmatches, display2, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
+		// END DEBUG
+	}
+	else {
+		//DEBUG
+		
+		cv::line(display, cv::Point(slidepose.X1, slidepose.Y1), cv::Point(slidepose.X2, slidepose.Y2), cv::Scalar(125, 255, 42, 255));
+		cv::line(display, cv::Point(slidepose.X2, slidepose.Y2), cv::Point(slidepose.X3, slidepose.Y3), cv::Scalar(125, 255, 42, 255));
+		cv::line(display, cv::Point(slidepose.X3, slidepose.Y3), cv::Point(slidepose.X4, slidepose.Y4), cv::Scalar(125, 255, 42, 255));
+		cv::line(display, cv::Point(slidepose.X4, slidepose.Y4), cv::Point(slidepose.X1, slidepose.Y1), cv::Scalar(125, 255, 42, 255));
+		//cv::imwrite("display_diff.png", display2);
+		
+		Mat display2;
+		
+		cv::drawMatches(ref_frame, ref_frame_keypoints, frame, frame_keypoints, filtered,
+		                display2, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
+		// END DEBUG
 	}
 	
 	canvas->UpdateGL(display);
 	
 	if (make_keyframe) {
+		slide_index           = new_slide_index;
 		ref_frame             = frame;
 		ref_frame_keypoints   = frame_keypoints;
 		ref_frame_descriptors = frame_descriptors;

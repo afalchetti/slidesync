@@ -58,10 +58,10 @@ Quad Quad::Perspective(Mat homography) const
 bool Quad::Inside(double x, double y) const
 {
 	// the dot product with every edge normal should be non-negative
-	return (x * nx1 + y * ny1 >= 0) &&
-	       (x * nx2 + y * ny2 >= 0) &&
-	       (x * nx3 + y * ny3 >= 0) &&
-	       (x * nx4 + y * ny4 >= 0);
+	return ((x - X1) * nx1 + (y - Y1) * ny1 >= 0) &&
+	       ((x - X2) * nx2 + (y - Y2) * ny2 >= 0) &&
+	       ((x - X3) * nx3 + (y - Y3) * ny3 >= 0) &&
+	       ((x - X4) * nx4 + (y - Y4) * ny4 >= 0);
 }
 
 string Quad::ToString() const
