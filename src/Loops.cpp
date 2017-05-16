@@ -502,6 +502,8 @@ void SyncLoop::track()
 	Mat  display;
 	bool hardframe     = false;
 	bool make_keyframe = false;  // make this the reference frame
+	bool goodmatch     = true;   // the match is good enough to be a keyframe (it will become one if other
+	                             // conditions also apply such as slide change or a large camera movement)
 	
 	if (frame.empty()) {
 		processor = &SyncLoop::idle;
@@ -551,8 +553,9 @@ void SyncLoop::track()
 		
 		hardframe = true;
 		
-		unsigned int         candidate_indices[5] = {slide_index, slide_index + 1, slide_index - 1,
-		                                             slide_index + 2, slide_index - 2};
+		unsigned int         candidate_indices[7] = {slide_index, slide_index + 1, slide_index - 1,
+		                                             slide_index + 2, slide_index - 2,
+		                                             slide_index + 3, slide_index - 3};
 		vector<unsigned int> candidates;
 		
 		unsigned int         bestslide = slide_index;
@@ -564,7 +567,7 @@ void SyncLoop::track()
 		double slidewidth  = (*slides)[bestslide].cols;
 		double slideheight = (*slides)[bestslide].rows;
 		
-		for (unsigned int i = 0; i < 4; i++) {
+		for (unsigned int i = 0; i < 7; i++) {
 			if (candidate_indices[i] >= 0 && candidate_indices[i] < slides->size()) {
 				candidates.push_back(candidate_indices[i]);
 			}
@@ -601,15 +604,17 @@ void SyncLoop::track()
 		cv::Scalar linecolor;
 		
 		if (bestcost < 1000) {
-			new_slide_index = bestslide;
-			slidepose       = bestslidepose;
 			linecolor       = cv::Scalar(125, 255, 42, 255);
 		}
 		else {
 			// this frame is too bad, skip it and hope the next one is better
 			linecolor     = cv::Scalar(255, 125, 42, 255);
 			make_keyframe = false;
+			goodmatch     = false;
 		}
+		
+		new_slide_index = bestslide;
+		slidepose       = bestslidepose;
 		
 		//DEBUG
 		
@@ -639,6 +644,13 @@ void SyncLoop::track()
 	}
 	
 	canvas->UpdateGL(display);
+	
+	double deformation;
+	double deviation = quaddeviation(ref_slidepose, slidepose, deformation);
+	
+	if (goodmatch && (deviation > largedeviation || deformation > largedeformation)) {
+		make_keyframe = true;
+	}
 	
 	std::cout << " -- Slide " << (slide_index + 1);
 	
