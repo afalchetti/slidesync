@@ -60,6 +60,9 @@ SyncLoop::SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, vector<Mat>* sli
 	  ref_quad_descriptors(),
 	  ref_quad_indices(),
 	  ref_slidepose(),
+	  prev_slidepose(),
+	  nearcount(),
+	  badcount(),
 	  sync_instructions(slides->size(), (unsigned int) round(footage->get(cv::CAP_PROP_FPS))),
 	  processor(&SyncLoop::initialize) {}
 
@@ -483,6 +486,7 @@ void SyncLoop::initialize()
 	ref_frame_keypoints   = frame_keypoints;
 	ref_frame_descriptors = frame_descriptors;
 	ref_slidepose         = slidepose;
+	prev_slidepose        = slidepose;
 	ref_quad_indices      = quadfilter(frame_keypoints, frame_descriptors, slidepose,
 	                                   ref_quad_keypoints, ref_quad_descriptors);
 	
@@ -491,6 +495,11 @@ void SyncLoop::initialize()
 
 void SyncLoop::track()
 {
+	const double largedeviation   = 10;
+	const double largedeformation = 7;
+	const double largecost        = 1000;
+	const double reasonablecost   = 40;
+	
 	std::cout << "Frame " << coarse_index << " (" << frame_index << " / "
 	                                              << index2timestamp(frame_index, 24) << ")";
 	
@@ -567,15 +576,26 @@ void SyncLoop::track()
 		double slidewidth  = (*slides)[bestslide].cols;
 		double slideheight = (*slides)[bestslide].rows;
 		
-		for (unsigned int i = 0; i < 7; i++) {
-			if (candidate_indices[i] >= 0 && candidate_indices[i] < slides->size()) {
-				candidates.push_back(candidate_indices[i]);
+		if (badcount < 7) {
+			for (unsigned int i = 0; i < 7; i++) {
+				if (candidate_indices[i] >= 0 && candidate_indices[i] < slides->size()) {
+					candidates.push_back(candidate_indices[i]);
+				}
 			}
+		}
+		else {
+			for (unsigned int i = 0; i < slides->size(); i++) {
+				candidates.push_back(i);
+			}
+			
+			// the first time, 7 bad frames are required. If there is still nothing good enough
+			// repeat this process every 4 bad frames
+			badcount -= 4;
 		}
 		
 		for (unsigned int i = 0; i < candidates.size(); i++) {
-			matches    = match           (slide_descriptors[candidates[i]], quad_descriptors);
-			homography = refineHomography(slide_keypoints  [candidates[i]], quad_keypoints,
+			matches    = match           (slide_descriptors[candidates[i]], frame_descriptors);
+			homography = refineHomography(slide_keypoints  [candidates[i]], frame_keypoints,
 			                              matches, filtered);
 			
 			slidepose = quadperspective(Quad(         0,           0,
@@ -583,7 +603,7 @@ void SyncLoop::track()
 			                                 slidewidth, slideheight,
 			                                 slidewidth,           0), homography);
 			
-			double cost = matchcost(slide_keypoints[candidates[i]], quad_keypoints,
+			double cost = matchcost(slide_keypoints[candidates[i]], frame_keypoints,
 			                        filtered, homography, ref_slidepose, slidepose);
 			
 			if (cost < bestcost) {
@@ -601,16 +621,37 @@ void SyncLoop::track()
 			make_keyframe = true;
 		}
 		
+		if (bestcost >= largecost) {
+			double cost_alt = matchcost(slide_keypoints[bestslide], frame_keypoints,
+			                            bestmatches, besthomography, prev_slidepose, bestslidepose);
+			
+			if (cost_alt < reasonablecost) {
+				nearcount += 1;
+				
+				if (nearcount >= 3) {
+					bestcost = cost_alt;
+				}
+			}
+			else {
+				nearcount = 0;
+			}
+		}
+		else {
+			nearcount = 0;
+		}
+		
 		cv::Scalar linecolor;
 		
-		if (bestcost < 1000) {
-			linecolor       = cv::Scalar(125, 255, 42, 255);
+		if (bestcost < largecost) {
+			linecolor = cv::Scalar(125, 255, 42, 255);
+			badcount  = 0;
 		}
 		else {
 			// this frame is too bad, skip it and hope the next one is better
-			linecolor     = cv::Scalar(255, 125, 42, 255);
+			linecolor     = cv::Scalar(255, 85, 42, 255);
 			make_keyframe = false;
 			goodmatch     = false;
+			badcount     += 1;
 		}
 		
 		new_slide_index = bestslide;
@@ -629,8 +670,8 @@ void SyncLoop::track()
 		// END DEBUG
 	}
 	else {
-		//DEBUG
-		
+		badcount  = 0;
+		nearcount = 0;
 		
 		//DEBUG
 		drawquad(display, slidepose, cv::Scalar(125, 255, 42, 255));
@@ -669,6 +710,8 @@ void SyncLoop::track()
 	if (hardframe) {
 		std::cout << "    H";
 	}
+	
+	prev_slidepose = slidepose;
 	
 	std::cout << std::endl;
 }

@@ -133,6 +133,19 @@ private:
 	/// could be out-of-frame.
 	Quad ref_slidepose;
 	
+	/// @brief Description of the slide pose in the previous frame
+	/// 
+	/// This quad will be used as a auxiliar reference in case the tracker gets lost.
+	Quad prev_slidepose;
+	
+	/// @brief Count of consecutive frames where the presentation Quad has been closed to where it was
+	///        int the previous slide (indicator of a robust match)
+	unsigned int nearcount;
+	
+	/// @brief Count of consecutive frames the tracker hasn't been able to find anything decent (indicator
+	///        of being totally lost and requiring a full scan through the slides)
+	unsigned int badcount;
+	
 	/// @brief Synchronization instructions to match the slides with the footage
 	SyncInstructions sync_instructions;
 	
