@@ -247,7 +247,8 @@ static const int min_matchsize = 5;
 /// @brief Number of matches that is good enough regardless of the percentage of the total keypoints they are
 static const int great_matchsize = 20;
 
-/// @brief Compute the average L1 deviation between matched keypoints
+/// @brief Internal function, do not use. Compute a cost for matching two frames, considering reprojection
+///        errors and changes in the presentation Quad
 /// 
 /// @param[in] keypoints1 Keypoints for the first frame.
 /// @param[in] keypoints2 Keypoints for the second frame.
@@ -274,7 +275,7 @@ static double matchcost(const vector<cv::KeyPoint>& keypoints1,
 	double deformation;
 	double deviation = quaddeviation(slidepose1, slidepose2, deformation);
 	
-	double deviationcost   = (deviation > deviation0) ? deviation - deviation0 : 0;
+	double deviationcost   = (deviation   > deviation0)   ?  deviation   - deviation0 : 0;
 	double deformationcost = (deformation > deformation0) ? (deformation - deformation0) *
 	                                                        (deformation - deformation0) : 0;
 	double matchcost       = 0;
@@ -395,6 +396,26 @@ Mat SyncLoop::refineHomography(const vector<cv::KeyPoint>& keypoints1,
 	return homography;
 }
 
+/// @brief Draw a Quad into a OpenCV matrix
+/// 
+/// @param[in] canvas Matrix to draw the Quad in.
+/// @param[in] quad Quad to draw.
+/// @param[in] color Line color.
+/// @param[in] offsetx Amount that every vertex will be moved in the X coordinate.
+/// @param[in] offsety Amount that every vertex will be moved in the Y coordinate.
+void drawquad(Mat& canvas, const Quad& quad, cv::Scalar color, double offsetx = 0, double offsety = 0)
+{
+	cv::Point vertices[4] = {cv::Point(quad.X1 + offsetx, quad.Y1 + offsety),
+	                         cv::Point(quad.X2 + offsetx, quad.Y2 + offsety),
+	                         cv::Point(quad.X3 + offsetx, quad.Y3 + offsety),
+	                         cv::Point(quad.X4 + offsetx, quad.Y4 + offsety)};
+	
+	cv::line(canvas, vertices[0], vertices[1], color);
+	cv::line(canvas, vertices[1], vertices[2], color);
+	cv::line(canvas, vertices[2], vertices[3], color);
+	cv::line(canvas, vertices[3], vertices[0], color);
+}
+
 void SyncLoop::initialize()
 {
 	// preprocess slide keypoints
@@ -454,12 +475,7 @@ void SyncLoop::initialize()
 	cv::drawMatches((*slides)[0], slide_keypoints[0], firstframe, frame_keypoints, filtered,
 	                display, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
 	
-	double width = footage->get(cv::CAP_PROP_FRAME_WIDTH);
-	
-	cv::line(display, cv::Point(slidepose.X1 + width, slidepose.Y1), cv::Point(slidepose.X2 + width, slidepose.Y2), cv::Scalar(125, 255, 42));
-	cv::line(display, cv::Point(slidepose.X2 + width, slidepose.Y2), cv::Point(slidepose.X3 + width, slidepose.Y3), cv::Scalar(125, 255, 42));
-	cv::line(display, cv::Point(slidepose.X3 + width, slidepose.Y3), cv::Point(slidepose.X4 + width, slidepose.Y4), cv::Scalar(125, 255, 42));
-	cv::line(display, cv::Point(slidepose.X4 + width, slidepose.Y4), cv::Point(slidepose.X1 + width, slidepose.Y1), cv::Scalar(125, 255, 42));
+	drawquad(display, slidepose, cv::Scalar(125, 255, 42), footage->get(cv::CAP_PROP_FRAME_WIDTH), 0);
 	//cv::imwrite("display_init.png", display);
 	// END DEBUG
 	
@@ -476,8 +492,7 @@ void SyncLoop::initialize()
 void SyncLoop::track()
 {
 	std::cout << "Frame " << coarse_index << " (" << frame_index << " / "
-	                                              << index2timestamp(frame_index, 24) << ") "
-	             "-- Slide " << (slide_index + 1) << ":" << std::endl;
+	                                              << index2timestamp(frame_index, 24) << ")";
 	
 	Mat  frame     = next_frame();
 	Quad slidepose = ref_slidepose;  // approximate the current Quad with the reference one, which should be
@@ -485,7 +500,8 @@ void SyncLoop::track()
 	                                 // turns out the real one is too far away from the reference one, the
 	                                 // reference will be updated to point to this one to reduce future errors
 	Mat  display;
-	bool make_keyframe = false;
+	bool hardframe     = false;
+	bool make_keyframe = false;  // make this the reference frame
 	
 	if (frame.empty()) {
 		processor = &SyncLoop::idle;
@@ -521,6 +537,10 @@ void SyncLoop::track()
 		}
 	}
 	
+	//DEBUG
+	drawquad(display, ref_slidepose, cv::Scalar(20, 40, 255, 255));
+	// END DEBUG
+	
 	unsigned int new_slide_index = slide_index;
 	
 	if (homography.empty() ||
@@ -528,6 +548,8 @@ void SyncLoop::track()
 	                quad_matches, homography,
 	                ref_slidepose, slidepose)) {
 		// the match is weak, check if other slides work better
+		
+		hardframe = true;
 		
 		unsigned int         candidate_indices[5] = {slide_index, slide_index + 1, slide_index - 1,
 		                                             slide_index + 2, slide_index - 2};
@@ -592,37 +614,37 @@ void SyncLoop::track()
 		//DEBUG
 		
 		// TODO make these HUDs interactive so the user can edit them if necessary
-		cv::line(display, cv::Point(bestslidepose.X1, bestslidepose.Y1), cv::Point(bestslidepose.X2, bestslidepose.Y2), linecolor);
-		cv::line(display, cv::Point(bestslidepose.X2, bestslidepose.Y2), cv::Point(bestslidepose.X3, bestslidepose.Y3), linecolor);
-		cv::line(display, cv::Point(bestslidepose.X3, bestslidepose.Y3), cv::Point(bestslidepose.X4, bestslidepose.Y4), linecolor);
-		cv::line(display, cv::Point(bestslidepose.X4, bestslidepose.Y4), cv::Point(bestslidepose.X1, bestslidepose.Y1), linecolor);
+		drawquad(display, bestslidepose, linecolor);
+		
+		//Mat display2;
+		//
+		//cv::drawMatches((*slides)[bestslide], slide_keypoints[bestslide], frame, quad_keypoints,
+		//                bestmatches, display2, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
 		//cv::imwrite("displayX.png", display2);
-		
-		Mat display2;
-		
-		cv::drawMatches((*slides)[bestslide], slide_keypoints[bestslide], frame, quad_keypoints,
-		                bestmatches, display2, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
 		// END DEBUG
 	}
 	else {
 		//DEBUG
 		
-		cv::line(display, cv::Point(slidepose.X1, slidepose.Y1), cv::Point(slidepose.X2, slidepose.Y2), cv::Scalar(125, 255, 42, 255));
-		cv::line(display, cv::Point(slidepose.X2, slidepose.Y2), cv::Point(slidepose.X3, slidepose.Y3), cv::Scalar(125, 255, 42, 255));
-		cv::line(display, cv::Point(slidepose.X3, slidepose.Y3), cv::Point(slidepose.X4, slidepose.Y4), cv::Scalar(125, 255, 42, 255));
-		cv::line(display, cv::Point(slidepose.X4, slidepose.Y4), cv::Point(slidepose.X1, slidepose.Y1), cv::Scalar(125, 255, 42, 255));
+		
+		//DEBUG
+		drawquad(display, slidepose, cv::Scalar(125, 255, 42, 255));
+		
+		//Mat display2;
+		//
+		//cv::drawMatches(ref_frame, ref_frame_keypoints, frame, frame_keypoints, filtered,
+		//                display2, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
 		//cv::imwrite("display_diff.png", display2);
-		
-		Mat display2;
-		
-		cv::drawMatches(ref_frame, ref_frame_keypoints, frame, frame_keypoints, filtered,
-		                display2, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
 		// END DEBUG
 	}
 	
 	canvas->UpdateGL(display);
 	
+	std::cout << " -- Slide " << (slide_index + 1);
+	
 	if (make_keyframe) {
+		std::cout << "    KF";
+		
 		slide_index           = new_slide_index;
 		ref_frame             = frame;
 		ref_frame_keypoints   = frame_keypoints;
@@ -631,6 +653,12 @@ void SyncLoop::track()
 		ref_quad_indices      = quadfilter(frame_keypoints, frame_descriptors, slidepose,
 		                                   ref_quad_keypoints, ref_quad_descriptors);
 	}
+	
+	if (hardframe) {
+		std::cout << "    H";
+	}
+	
+	std::cout << std::endl;
 }
 
 void SyncLoop::idle()
