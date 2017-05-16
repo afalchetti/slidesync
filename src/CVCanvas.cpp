@@ -45,7 +45,7 @@ using slidesync::CVCanvas;
 
 /// @brief Event signal routing table for CVCanvas
 wxBEGIN_EVENT_TABLE(CVCanvas, wxGLCanvas)
-	EVT_PAINT(CVCanvas::render)
+	EVT_PAINT(CVCanvas::onpaint)
 wxEND_EVENT_TABLE()
 
 namespace slidesync
@@ -110,8 +110,7 @@ bool CVCanvas::UpdateGL()
 	
 	glBindTexture(GL_TEXTURE_2D, textureID);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
-	Refresh();
-	Update();
+	RenderNow();
 	
 	return true;
 }
@@ -120,6 +119,18 @@ bool CVCanvas::UpdateGL(const Mat& frame)
 {
 	this->frame = frame;
 	return UpdateGL();
+}
+
+void CVCanvas::RenderNow()
+{
+	wxClientDC dc(this);
+	render(dc);
+}
+
+void CVCanvas::onpaint(wxPaintEvent& event)
+{
+	wxPaintDC dc(this);
+	render(dc);
 }
 
 void CVCanvas::prepare_viewport(int left, int top, int right, int bottom)
@@ -140,14 +151,13 @@ void CVCanvas::prepare_viewport(int left, int top, int right, int bottom)
 	glBindTexture(GL_TEXTURE_2D, textureID);
 }
 
-void CVCanvas::render(wxPaintEvent& evt)
+void CVCanvas::render(wxDC& dc)
 {
     if(!IsShown()) {
 		return;
 	}
 	
 	SetCurrent(*context);
-	wxPaintDC(this);
 	
 	wxSize size = GetSize();
 	

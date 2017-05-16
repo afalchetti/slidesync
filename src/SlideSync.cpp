@@ -387,7 +387,7 @@ bool SlideSyncApp::OnInit()
 	appstate = SyncAppState::Synchronizing;
 	window->SetStatusText("Synchronizing");
 	
-	processloop->Start(100);
+	processloop->Start(40);
 	
 	return true;
 }

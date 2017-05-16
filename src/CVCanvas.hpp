@@ -99,12 +99,18 @@ public:
 	///          has a different size than specified at initialization or if it is not 8-bit RGBA.
 	bool UpdateGL(const Mat& frame);
 	
+	/// @brief Render to screen now, without waiting for the event loop
+	void RenderNow();
+	
 private:
+	/// @brief Handle the Paint event of the window
+	void onpaint(wxPaintEvent& event);
+	
 	/// @brief Prepare the OpenGL context for rendering
 	void prepare_viewport(int left, int top, int right, int bottom);
 	
 	/// @brief Render the OpenGL texture to the screen
-	void render(wxPaintEvent& evt);
+	void render(wxDC& evt);
 
 protected:
 	/// @brief Declaration of event signal routing table for CVCanvas
