@@ -30,37 +30,36 @@ using cv::Mat;
 namespace slidesync
 {
 
-/// @brief Two-dimensional polygon with four vertices
+/// @brief Two-dimensional polygon with four vertices. Immutable
 class Quad
 {
-public:
+private:
 	// Vertices
 	
 	/// @brief First vertex's X coordinate
-	double X1;
+	double x1;
 	
 	/// @brief First vertex's Y coordinate
-	double Y1;
+	double y1;
 	
 	/// @brief Second vertex's X coordinate
-	double X2;
+	double x2;
 	
 	/// @brief Second vertex's Y coordinate
-	double Y2;
+	double y2;
 	
 	/// @brief Third vertex's X coordinate
-	double X3;
+	double x3;
 	
 	/// @brief Third vertex's Y coordinate
-	double Y3;
+	double y3;
 	
 	/// @brief Fourth vertex's X coordinate
-	double X4;
+	double x4;
 	
 	/// @brief Fourth vertex's Y coordinate
-	double Y4;
+	double y4;
 	
-private:
 	// Edge normals
 	
 	/// @brief First (non-unitary) normal's X coordinate
@@ -108,6 +107,30 @@ public:
 	/// @param[in] x4 Fourth vertex's X coordinate
 	/// @param[in] y4 Fourth vertex's Y coordinate
 	Quad(double x1, double y1, double x2, double y2, double x3, double y3, double x4, double y4);
+	
+	/// @brief Get the first vertex's X coordinate
+	double X1() const;
+	
+	/// @brief Get the first vertex's Y coordinate
+	double Y1() const;
+	
+	/// @brief Get the second vertex's X coordinate
+	double X2() const;
+	
+	/// @brief Get the second vertex's Y coordinate
+	double Y2() const;
+	
+	/// @brief Get the third vertex's X coordinate
+	double X3() const;
+	
+	/// @brief Get the third vertex's Y coordinate
+	double Y3() const;
+	
+	/// @brief Get the fourth vertex's X coordinate
+	double X4() const;
+	
+	/// @brief Get the fourth vertex's Y coordinate
+	double Y4() const;
 	
 	/// @brief Transform this Quad following a perspective homography matrix
 	/// 

@@ -218,10 +218,10 @@ static Quad quadperspective(const Quad& quad, const Mat& homography)
 /// @returns Deviation: average displacement of the Quad's vertices.
 static double quaddeviation(const Quad& first, const Quad& second, double& deformation)
 {
-	double diff[8] = {second.X1 - first.X1, second.Y1 - first.Y1,
-	                  second.X2 - first.X2, second.Y2 - first.Y2,
-	                  second.X3 - first.X3, second.Y3 - first.Y3,
-	                  second.X4 - first.X4, second.Y4 - first.Y4};
+	double diff[8] = {second.X1() - first.X1(), second.Y1() - first.Y1(),
+	                  second.X2() - first.X2(), second.Y2() - first.Y2(),
+	                  second.X3() - first.X3(), second.Y3() - first.Y3(),
+	                  second.X4() - first.X4(), second.Y4() - first.Y4()};
 	
 	double avgdiff[2] = {(diff[0] + diff[2] + diff[4] + diff[6]) / 4,
 	                     (diff[1] + diff[3] + diff[5] + diff[7]) / 4};
@@ -420,10 +420,10 @@ Mat SyncLoop::refineHomography(const vector<cv::KeyPoint>& keypoints1,
 /// @param[in] offsety Amount that every vertex will be moved in the Y coordinate.
 void drawquad(Mat& canvas, const Quad& quad, cv::Scalar color, double offsetx = 0, double offsety = 0)
 {
-	cv::Point vertices[4] = {cv::Point(quad.X1 + offsetx, quad.Y1 + offsety),
-	                         cv::Point(quad.X2 + offsetx, quad.Y2 + offsety),
-	                         cv::Point(quad.X3 + offsetx, quad.Y3 + offsety),
-	                         cv::Point(quad.X4 + offsetx, quad.Y4 + offsety)};
+	cv::Point vertices[4] = {cv::Point(quad.X1() + offsetx, quad.Y1() + offsety),
+	                         cv::Point(quad.X2() + offsetx, quad.Y2() + offsety),
+	                         cv::Point(quad.X3() + offsetx, quad.Y3() + offsety),
+	                         cv::Point(quad.X4() + offsetx, quad.Y4() + offsety)};
 	
 	cv::line(canvas, vertices[0], vertices[1], color);
 	cv::line(canvas, vertices[1], vertices[2], color);

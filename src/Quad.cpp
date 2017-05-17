@@ -30,12 +30,12 @@ namespace slidesync
 {
 
 Quad::Quad()
-	: X1(0), Y1(0), X2(0), Y2(0), X3(0), Y3(0), X4(0), Y4(0),
+	: x1(0), y1(0), x2(0), y2(0), x3(0), y3(0), x4(0), y4(0),
 	  nx1(0), ny1(0), nx2(0), ny2(0), nx3(0), ny3(0), nx4(0), ny4(0),
 	  area(0), convexclockwise(true) {}
 
 Quad::Quad(double x1, double y1, double x2, double y2, double x3, double y3, double x4, double y4)
-	: X1(x1), Y1(y1), X2(x2), Y2(y2), X3(x3), Y3(y3), X4(x4), Y4(y4),
+	: x1(x1), y1(y1), x2(x2), y2(y2), x3(x3), y3(y3), x4(x4), y4(y4),
 	  nx1(y2 - y1), ny1(x1 - x2), nx2(y3 - y2), ny2(x2 - x3),
 	  nx3(y4 - y3), ny3(x3 - x4), nx4(y1 - y4), ny4(x4 - x1),
 	  area(0), convexclockwise(false)
@@ -69,10 +69,50 @@ Quad::Quad(double x1, double y1, double x2, double y2, double x3, double y3, dou
 	area = -(nx1 * ny2 - nx2 * ny1) + -(nx3 * ny4 - nx4 * ny3);
 }
 
+double Quad::X1() const
+{
+	return x1;
+}
+
+double Quad::Y1() const
+{
+	return y1;
+}
+
+double Quad::X2() const
+{
+	return x2;
+}
+
+double Quad::Y2() const
+{
+	return y2;
+}
+
+double Quad::X3() const
+{
+	return x3;
+}
+
+double Quad::Y3() const
+{
+	return y3;
+}
+
+double Quad::X4() const
+{
+	return x4;
+}
+
+double Quad::Y4() const
+{
+	return y4;
+}
+
 Quad Quad::Perspective(Mat homography) const
 {
-	double quad[12] = { X1,  X2,  X3,  X4,
-	                    Y1,  Y2,  Y3,  Y4,
+	double quad[12] = { x1,  x2,  x3,  x4,
+	                    y1,  y2,  y3,  y4,
 	                   1.0, 1.0, 1.0, 1.0};
 	
 	Mat quadmat(3, 4, CV_64F, quad);
@@ -89,10 +129,10 @@ Quad Quad::Perspective(Mat homography) const
 bool Quad::Inside(double x, double y) const
 {
 	// the dot product with every edge normal should be non-negative
-	return ((x - X1) * nx1 + (y - Y1) * ny1 >= 0) &&
-	       ((x - X2) * nx2 + (y - Y2) * ny2 >= 0) &&
-	       ((x - X3) * nx3 + (y - Y3) * ny3 >= 0) &&
-	       ((x - X4) * nx4 + (y - Y4) * ny4 >= 0);
+	return ((x - x1) * nx1 + (y - y1) * ny1 >= 0) &&
+	       ((x - x2) * nx2 + (y - y2) * ny2 >= 0) &&
+	       ((x - x3) * nx3 + (y - y3) * ny3 >= 0) &&
+	       ((x - x4) * nx4 + (y - y4) * ny4 >= 0);
 }
 
 bool Quad::ConvexClockwise() const
@@ -107,10 +147,10 @@ double Quad::Area() const
 
 string Quad::ToString() const
 {
-	return "[(" + std::to_string(X1) + ", " + std::to_string(Y1) + "); "
-	        "(" + std::to_string(X2) + ", " + std::to_string(Y2) + "); "
-	        "(" + std::to_string(X3) + ", " + std::to_string(Y3) + "); "
-	        "(" + std::to_string(X4) + ", " + std::to_string(Y4) + ")]";
+	return "[(" + std::to_string(x1) + ", " + std::to_string(y1) + "); "
+	        "(" + std::to_string(x2) + ", " + std::to_string(y2) + "); "
+	        "(" + std::to_string(x3) + ", " + std::to_string(y3) + "); "
+	        "(" + std::to_string(x4) + ", " + std::to_string(y4) + ")]";
 }
 
 }
