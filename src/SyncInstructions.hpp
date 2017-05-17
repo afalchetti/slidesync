@@ -20,6 +20,7 @@
 #ifndef SYNCINSTRUCTIONS_HPP
 #define SYNCINSTRUCTIONS_HPP 1
 
+#include <iostream>
 #include <vector>
 #include <tuple>
 #include <string>
@@ -78,8 +79,8 @@ public:
 	
 	/// @brief Construct a SyncInstructions object from its string representation
 	/// 
-	/// @param[in] descriptor String representation.
-	SyncInstructions(string descriptor);
+	/// @param[in] descriptor String representation through a stream reader.
+	SyncInstructions(std::istream& descriptor);
 	
 	/// @brief Add a "next slide" instruction
 	/// 

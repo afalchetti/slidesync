@@ -27,6 +27,7 @@
 
 #include <wx/wxprec.h>
 #include <wx/timer.h>
+#include <wx/file.h>
  
 #ifndef WX_PRECOMP
 	#include <wx/wx.h>
@@ -402,6 +403,22 @@ void SyncLoop::initialize()
 		slide_descriptors.push_back(descriptors);
 		
 		wxTheApp->Yield(true);
+	}
+	
+	if (wxFile::Exists(cachefname)) {
+		std::ifstream instructions(cachefname);
+		
+		try {
+			sync_instructions = SyncInstructions(instructions);
+			LoopEvent loopfinished(LoopFinishedEvent);
+			wxPostEvent(this, loopfinished);
+			
+			processor = &SyncLoop::idle;
+			return;
+		}
+		catch (const std::ios_base::failure& e) {
+			std::cerr << "Can't parse instructions file" << std::endl << e.what() << std::endl;
+		}
 	}
 	
 	// match the first frame to find the slides projection or screen in the footage

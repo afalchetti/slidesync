@@ -20,6 +20,7 @@
 #include <string>
 #include <sstream>
 #include <ios>
+#include <iostream>
 
 #include <wx/wxprec.h>
  
@@ -149,7 +150,13 @@ std::istream& operator>>(std::istream& stream, const Skip& skip) {
 		stream.get();
 	}
 	
-	stream >> skipws;
+	if (skipws) {
+		stream >> std::skipws;
+	}
+	else {
+		stream >> std::noskipws;
+	}
+	
 	return stream;
 }
 

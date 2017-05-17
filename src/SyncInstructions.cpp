@@ -38,52 +38,51 @@ SyncInstructions::SyncInstructions(unsigned int length)
 SyncInstructions::SyncInstructions(unsigned int length, unsigned int framerate)
 	: instructions(), framerate(framerate), current_index(0), length(length) {}
 
-SyncInstructions::SyncInstructions(string descriptor)
+SyncInstructions::SyncInstructions(std::istream& descriptor)
 	: instructions(), framerate(0), current_index(0), length(0)
 {
-	std::istringstream reader(descriptor);
-	unsigned int       ninstructions;
+	unsigned int ninstructions;
 	
-	reader.exceptions(reader.failbit);
+	descriptor.exceptions(descriptor.failbit);
 	
-	reader >> Skip("nslides")       >> Skip("=") >> length        >> Skip("\n");
-	reader >> Skip("framerate")     >> Skip("=") >> framerate     >> Skip("\n");
-	reader >> Skip("ninstructions") >> Skip("=") >> ninstructions >> Skip("\n");
+	descriptor >> Skip("nslides")       >> Skip("=") >> length        >> Skip("\n");
+	descriptor >> Skip("framerate")     >> Skip("=") >> framerate     >> Skip("\n");
+	descriptor >> Skip("ninstructions") >> Skip("=") >> ninstructions >> Skip("\n");
 	
 	for (unsigned int i = 0; i < ninstructions; i++) {
-		reader >> Skip("[");
-		reader >> Skip("");
+		descriptor >> Skip("[");
+		descriptor >> Skip("");
 		// skipping the empty string will force the reader to discard any whitespace
 		// this is to make the format symmetrical; otherwise "[123 ]" would be allowed, but "[ 123]" would not
 		// and between allowing the left space and forbidding the right one, the lenient first option is
 		// preferred to maximize user happiness (see: HTML parsers :P)
 		
-		bool relative = (reader.peek() == '+');
+		bool relative = (descriptor.peek() == '+');
 		int  index = 0;
 		
 		
 		if (relative) {  // discard the "+"
-			reader.get();
+			descriptor.get();
 		}
 		
 		if (framerate != 0) {
 			string timestamp(11, ' ');  // "HH:mm:ss.FF"
-			reader.read(&timestamp[0], 11);
+			descriptor.read(&timestamp[0], 11);
 			
 			index = timestamp2index(timestamp, framerate);
 		}
 		else {
-			reader >> index;
+			descriptor >> index;
 		}
 		
 		if (relative) {
 			index = -index;
 		}
 		
-		reader >> Skip("]") >> Skip(":");
+		descriptor >> Skip("]") >> Skip(":");
 		
 		string instruction_str;
-		std::getline(reader, instruction_str, '\n');
+		std::getline(descriptor, instruction_str, '\n');
 		int    instruction;
 		
 		if (instruction_str == "next") {
