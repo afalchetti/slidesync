@@ -275,6 +275,18 @@ static double matchcost(const vector<cv::KeyPoint>& keypoints1,
 		return std::numeric_limits<double>::infinity();
 	}
 	
+	if (!slidepose1.ConvexClockwise() || !slidepose2.ConvexClockwise()) {
+		return std::numeric_limits<double>::infinity();
+	}
+	
+	if (slidepose1.Area() < 10 * 10 || slidepose2.Area() < 10 * 10) {
+		return std::numeric_limits<double>::infinity();
+	}
+	
+	if (slidepose1.Area() > 5000 * 5000 || slidepose2.Area() > 5000 * 5000) {
+		return std::numeric_limits<double>::infinity();
+	}
+	
 	double deformation;
 	double deviation = quaddeviation(slidepose1, slidepose2, deformation);
 	
@@ -615,12 +627,6 @@ void SyncLoop::track()
 			}
 		}
 		
-		// update reference frame
-		
-		if (bestslide != slide_index) {
-			make_keyframe = true;
-		}
-		
 		if (bestcost >= largecost) {
 			double cost_alt = matchcost(slide_keypoints[bestslide], frame_keypoints,
 			                            bestmatches, besthomography, prev_slidepose, bestslidepose);
@@ -656,6 +662,10 @@ void SyncLoop::track()
 		
 		new_slide_index = bestslide;
 		slidepose       = bestslidepose;
+		
+		if (goodmatch && bestslide != slide_index) {
+			make_keyframe = true;
+		}
 		
 		//DEBUG
 		

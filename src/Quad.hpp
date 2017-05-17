@@ -87,7 +87,11 @@ private:
 	/// @brief Fourth (non-unitary) normal's Y coordinate
 	double ny4;
 	
+	/// @brief Precomputed area inside the quad
+	double area;
 	
+	/// @brief Whether this Quad is convex and clockwise
+	bool convexclockwise;
 	
 public:
 	/// @brief Construct a quad with every component set to zero
@@ -123,6 +127,18 @@ public:
 	/// @param[in] x First coordinate of the point
 	/// @param[in] y Second coordinate of the point
 	bool Inside(double x, double y) const;
+	
+	/// @brief Check if this Quad is convex and the vertices are in clockwise order
+	/// 
+	/// @returns True if the Quad is convex and clockwise; otherwise, false.
+	bool ConvexClockwise() const;
+	
+	/// @brief Get the area inside the Quad
+	/// 
+	/// @remarks Only valid for convex clockwise Quads.
+	/// @returns Area.
+	double Area() const;
+	
 	
 	/// @brief Get a string representation of this Quad
 	string ToString() const;

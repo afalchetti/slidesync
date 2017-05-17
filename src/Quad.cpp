@@ -31,12 +31,43 @@ namespace slidesync
 
 Quad::Quad()
 	: X1(0), Y1(0), X2(0), Y2(0), X3(0), Y3(0), X4(0), Y4(0),
-	  nx1(0), ny1(0), nx2(0), ny2(0), nx3(0), ny3(0), nx4(0), ny4(0) {}
+	  nx1(0), ny1(0), nx2(0), ny2(0), nx3(0), ny3(0), nx4(0), ny4(0),
+	  area(0), convexclockwise(true) {}
 
 Quad::Quad(double x1, double y1, double x2, double y2, double x3, double y3, double x4, double y4)
 	: X1(x1), Y1(y1), X2(x2), Y2(y2), X3(x3), Y3(y3), X4(x4), Y4(y4),
 	  nx1(y2 - y1), ny1(x1 - x2), nx2(y3 - y2), ny2(x2 - x3),
-	  nx3(y4 - y3), ny3(x3 - x4), nx4(y1 - y4), ny4(x4 - x1) {}
+	  nx3(y4 - y3), ny3(x3 - x4), nx4(y1 - y4), ny4(x4 - x1),
+	  area(0), convexclockwise(false)
+{
+	// being clockwise means that every angle between edges should be in [pi, 2pi]
+	// (counterclockwise means angles in [0, pi] and convexity means that every angle has the
+	// same "clockwiseness")
+	// 
+	// to compute the clockwiseness the cross product is used, which will be negative for clockwise
+	// angles and positive for counterclockwise ones. Zero is the degenerate case of one vertices lying
+	// in the line connecting other two and will be considered acceptable as clockwise
+	// 
+	// note that this cross product is conserved when swapping the edges with their normals
+	
+	convexclockwise = (nx1 * ny2 - nx2 * ny1 <= 0) &&
+	                  (nx2 * ny3 - nx3 * ny2 <= 0) &&
+	                  (nx3 * ny4 - nx4 * ny3 <= 0) &&
+	                  (nx4 * ny1 - nx1 * ny4 <= 0);
+	
+	
+	// break the (clockwise convex) Quad into two triangles and sum their areas
+	// 
+	// to find the area of the triangles, just halve the cross product between their edges
+	// (its magnitude is the area of the parallelogram implied by the vectors)
+	// 
+	// note that this cross product is conserved when swapping the edges with their normals
+	// 
+	// also, since the Quad is clockwise convex, all the cross product are negatives, so
+	// abs(ei x ek) = -(ei x ek)
+	
+	area = -(nx1 * ny2 - nx2 * ny1) + -(nx3 * ny4 - nx4 * ny3);
+}
 
 Quad Quad::Perspective(Mat homography) const
 {
@@ -62,6 +93,16 @@ bool Quad::Inside(double x, double y) const
 	       ((x - X2) * nx2 + (y - Y2) * ny2 >= 0) &&
 	       ((x - X3) * nx3 + (y - Y3) * ny3 >= 0) &&
 	       ((x - X4) * nx4 + (y - Y4) * ny4 >= 0);
+}
+
+bool Quad::ConvexClockwise() const
+{
+	return convexclockwise;
+}
+
+double Quad::Area() const
+{
+	return area;
 }
 
 string Quad::ToString() const
