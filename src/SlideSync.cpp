@@ -75,12 +75,16 @@ public:
 	/// @brief Set the internal processing loop observer
 	void SetProcessLoop(std::unique_ptr<ProcessLoop>* processloop);
 	
+	/// @brief Destroy the window and stop the timer
+	virtual bool Destroy() override;
+	
 private:
 	/// @brief Close the application on exit
-	void OnExit(wxCommandEvent& event);
+	void onexit(wxCommandEvent& event);
 	
 	/// @brief Show about dialog box
-	void OnAbout(wxCommandEvent& event);
+	void onabout(wxCommandEvent& event);
+	
 	
 protected:
 	/// @brief Declaration of event signal routing table for SlideSyncWindow
@@ -140,8 +144,8 @@ using slidesync::SlideSyncWindow;
 
 /// @brief Event signal routing table for SlideSyncWindow
 wxBEGIN_EVENT_TABLE(SlideSyncWindow, wxFrame)
-	EVT_MENU(wxID_EXIT, SlideSyncWindow::OnExit)
-	EVT_MENU(wxID_ABOUT, SlideSyncWindow::OnAbout)
+	EVT_MENU(wxID_EXIT, SlideSyncWindow::onexit)
+	EVT_MENU(wxID_ABOUT, SlideSyncWindow::onabout)
 wxEND_EVENT_TABLE()
 
 wxIMPLEMENT_APP(SlideSyncApp);
@@ -190,12 +194,18 @@ void SlideSyncWindow::SetProcessLoop(std::unique_ptr<ProcessLoop>* processloop)
 	this->processloop = processloop;
 }
 
-void SlideSyncWindow::OnExit(wxCommandEvent& event)
+bool SlideSyncWindow::Destroy()
+{
+	(*processloop)->Stop();
+	return wxFrame::Destroy();
+}
+
+void SlideSyncWindow::onexit(wxCommandEvent& event)
 {
 	Close(true);
 }
 
-void SlideSyncWindow::OnAbout(wxCommandEvent& event)
+void SlideSyncWindow::onabout(wxCommandEvent& event)
 {
 	wxMessageBox("SlideSync 0.1\nby Angelo Falchetti", "About SlideSync", wxOK | wxICON_INFORMATION);
 }

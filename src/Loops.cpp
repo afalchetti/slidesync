@@ -64,7 +64,8 @@ SyncLoop::SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, vector<Mat>* sli
 	  nearcount(),
 	  badcount(),
 	  sync_instructions(slides->size(), (unsigned int) round(footage->get(cv::CAP_PROP_FPS))),
-	  processor(&SyncLoop::initialize) {}
+	  processor(&SyncLoop::initialize),
+	  processing(false) {}
 
 void SyncLoop::SetCanvas(CVCanvas* canvas)
 {
@@ -78,7 +79,13 @@ void SyncLoop::SetFootage(cv::VideoCapture* footage)
 
 void SyncLoop::Notify()
 {
+	if (processing) {
+		return;
+	}
+	
+	processing = true;
 	(this->*processor)();
+	processing = false;
 }
 
 SyncInstructions SyncLoop::GetSyncInstructions()
@@ -443,6 +450,8 @@ void SyncLoop::initialize()
 		
 		slide_keypoints  .push_back(keypoints);
 		slide_descriptors.push_back(descriptors);
+		
+		wxTheApp->Yield(true);
 	}
 	
 	// match the first frame to find the slides projection or screen in the footage
@@ -462,10 +471,16 @@ void SyncLoop::initialize()
 	
 	detector->detectAndCompute(firstframe, cv::noArray(), frame_keypoints, frame_descriptors);
 	
+	wxTheApp->Yield(true);
+	
 	vector<cv::DMatch> matches = match(slide_descriptors[0], frame_descriptors);
 	vector<cv::DMatch> filtered;
 	
+	wxTheApp->Yield(true);
+	
 	Mat homography = refineHomography(slide_keypoints[0], frame_keypoints, matches, filtered);
+	
+	wxTheApp->Yield(true);
 	
 	if (homography.empty()) {
 		std::cerr << "Can't find a robust matching" << std::endl;
@@ -484,14 +499,14 @@ void SyncLoop::initialize()
 	                                      slidewidth, slideheight,
 	                                      slidewidth,           0), homography);
 	
-	// DEBUG The next section is only for visual inspection purposes, it is not executed in production
-	Mat display;
-	
-	cv::drawMatches((*slides)[0], slide_keypoints[0], firstframe, frame_keypoints, filtered,
-	                display, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
-	
-	drawquad(display, slidepose, cv::Scalar(125, 255, 42), footage->get(cv::CAP_PROP_FRAME_WIDTH), 0);
-	//cv::imwrite("display_init.png", display);
+	//  DEBUG The next section is only for visual inspection purposes, it is not executed in production
+	// Mat display;
+	// 
+	// cv::drawMatches((*slides)[0], slide_keypoints[0], firstframe, frame_keypoints, filtered,
+	//                 display, cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255));
+	// 
+	// drawquad(display, slidepose, cv::Scalar(125, 255, 42), footage->get(cv::CAP_PROP_FRAME_WIDTH), 0);
+	// cv::imwrite("display_init.png", display);
 	// END DEBUG
 	
 	ref_frame             = firstframe;
@@ -539,8 +554,12 @@ void SyncLoop::track()
 	
 	detector->detectAndCompute(frame, cv::noArray(), frame_keypoints, frame_descriptors);
 	
+	wxTheApp->Yield(true);
+	
 	vector<cv::DMatch> matches   = match(ref_frame_descriptors, frame_descriptors);
 	vector<cv::DMatch> filtered;
+	
+	wxTheApp->Yield(true);
 	
 	Mat homography = refineHomography(ref_frame_keypoints, frame_keypoints, matches, filtered);
 	slidepose      = quadperspective(ref_slidepose, homography);
@@ -563,6 +582,8 @@ void SyncLoop::track()
 	//DEBUG
 	drawquad(display, ref_slidepose, cv::Scalar(20, 40, 255, 255));
 	// END DEBUG
+	
+	wxTheApp->Yield(true);
 	
 	unsigned int new_slide_index = slide_index;
 	
@@ -605,10 +626,17 @@ void SyncLoop::track()
 			badcount -= 4;
 		}
 		
+		wxTheApp->Yield(true);
+		
 		for (unsigned int i = 0; i < candidates.size(); i++) {
 			matches    = match           (slide_descriptors[candidates[i]], frame_descriptors);
+			
+			wxTheApp->Yield(true);
+			
 			homography = refineHomography(slide_keypoints  [candidates[i]], frame_keypoints,
 			                              matches, filtered);
+			
+			wxTheApp->Yield(true);
 			
 			slidepose = quadperspective(Quad(         0,           0,
 			                                          0, slideheight,
@@ -625,6 +653,8 @@ void SyncLoop::track()
 				bestmatches    = filtered;
 				bestcost       = cost;
 			}
+			
+			wxTheApp->Yield(true);
 		}
 		
 		if (bestcost >= largecost) {
@@ -672,6 +702,8 @@ void SyncLoop::track()
 		// TODO make these HUDs interactive so the user can edit them if necessary
 		drawquad(display, bestslidepose, linecolor);
 		
+		wxTheApp->Yield(true);
+		
 		//Mat display2;
 		//
 		//cv::drawMatches((*slides)[bestslide], slide_keypoints[bestslide], frame, quad_keypoints,
@@ -694,7 +726,11 @@ void SyncLoop::track()
 		// END DEBUG
 	}
 	
-	canvas->UpdateGL(display);
+	if (IsRunning()) {
+		// if someone stopped the timer, it is probable the window has been destroyed in one of the Yield()
+		// calls above, so canvas is no longer valid and this would segfault; bail out
+		canvas->UpdateGL(display);
+	}
 	
 	double deformation;
 	double deviation = quaddeviation(ref_slidepose, slidepose, deformation);
