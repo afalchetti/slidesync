@@ -21,10 +21,71 @@
 #include <sstream>
 #include <ios>
 
+#include <wx/wxprec.h>
+ 
+#ifndef WX_PRECOMP
+	#include <wx/wx.h>
+#endif
+
 #include "util.hpp"
 
 namespace slidesync
 {
+
+bool isnumeric(int c)
+{
+	return '0' <= c && c <= '9';
+}
+
+int compare_lexiconumerical(const wxString& a, const wxString& b)
+{
+	unsigned int i;
+	unsigned int k;
+	int          diff;
+	
+	for (i = 0, k = 0; i < a.length() && k < b.length(); i++, k++) {
+		if (isnumeric(a[i]) && isnumeric(b[k])) {
+			unsigned int p;
+			unsigned int q;
+			
+			// p and q will point to the end of the number
+			for (p = i + 1; p < a.length() && isnumeric(a[p]); p++) {}
+			for (q = k + 1; q < b.length() && isnumeric(b[q]); q++) {}
+			
+			// char lengths of the numbers
+			int alen = p - i;
+			int blen = q - k;
+			
+			if (alen != blen) {
+				return alen - blen;
+			}
+			
+			// the numbers have the same length, they can be compared lexicographically
+			for (; i < p; i++, k++) {
+				diff = (int) a[i] - (int) b[k];
+				
+				if (diff != 0) {
+					return diff;
+				}
+			}
+			
+			i = p - 1;
+			k = q - 1;
+		}
+		else {
+			diff = (int) a[i] - (int) b[k];
+			
+			if (diff != 0) {
+				return diff;
+			}
+		}
+	}
+	
+	int aremaining = a.length() - i;
+	int bremaining = b.length() - k;
+	
+	return aremaining - bremaining;
+}
 
 Skip::Skip(string literal)
 		: literalws(), literalword()

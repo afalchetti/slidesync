@@ -60,5 +60,6 @@ add_custom_target(doc ALL
                   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/doc
                   VERBATIM)
 
-add_executable(slidesync "src/util.cpp" "src/Quad.cpp" "src/SyncInstructions.cpp" "src/CVCanvas.cpp" "src/Loops.cpp" "src/IMhelpers.cpp" "src/SlideSync.cpp")
+add_executable(slidesync "src/util.cpp" "src/Quad.cpp" "src/SyncInstructions.cpp" "src/CVCanvas.cpp"
+                         "src/ProcessLoop.cpp" "src/SyncLoop.cpp" "src/GenLoop.cpp" "src/IMhelpers.cpp" "src/SlideSync.cpp")
 target_link_libraries(slidesync ${ImageMagick_LIBRARIES} ${OpenCV_LIBS} ${wxWidgets_LIBRARIES} ${OPENGL_LIBRARIES})

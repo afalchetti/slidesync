@@ -1,5 +1,5 @@
-/// @file Loops.hpp
-/// @brief Video processing loops header file
+/// @file SyncLoop.hpp
+/// @brief Synchronization processing loop header file
 // 
 // Part of SlideSync
 // 
@@ -17,19 +17,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef LOOPS_HPP
-#define LOOPS_HPP 1
+#ifndef SYNCLOOP_HPP
+#define SYNCLOOP_HPP 1
 
 #include <opencv2/opencv.hpp>
 
-#include <wx/wxprec.h>
-#include <wx/cmdline.h>
-#include <wx/timer.h>
- 
-#ifndef WX_PRECOMP
-	#include <wx/wx.h>
-#endif
-
+#include "ProcessLoop.hpp"
 #include "CVCanvas.hpp"
 #include "Quad.hpp"
 #include "SyncInstructions.hpp"
@@ -39,9 +32,6 @@ using cv::Mat;
 
 namespace slidesync
 {
-
-/// @brief Tag base class
-class ProcessLoop : public wxTimer {};
 
 class SyncLoop;
 
@@ -69,6 +59,9 @@ private:
 	
 	/// @brief RANSAC threshold to decide a point is within the inlier group
 	static constexpr float RANSAC_threshold = 2.5;
+	
+	/// @brief Name of the cache file for the synchronization instructions
+	string cachefname;
 	
 	/// @brief OpenGL canvas observer reference
 	CVCanvas* canvas;
@@ -163,10 +156,12 @@ private:
 public:
 	/// @brief Construct a SyncLoop
 	/// 
-	/// @param[in] canvas OpenGL canvas to draw user interactive interface
-	/// @param[in] footage Recording of the presentation
-	/// @param[in] slides Array of slide images
-	SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, std::vector<Mat>* slides);
+	/// @param[in] canvas OpenGL canvas to draw user interactive interface.
+	/// @param[in] footage Recording of the presentation.
+	/// @param[in] slides Array of slide images.
+	/// @param[in] cachefname Name of the SyncInstructions cache file.
+	SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, std::vector<Mat>* slides,
+	         const string& cachefname);
 	
 	/// @brief Set the internal canvas
 	void SetCanvas(CVCanvas* canvas);
@@ -186,18 +181,18 @@ private:
 	
 	/// @brief Compute a matching between two images given their keypoints
 	/// 
-	/// @param[in] descriptors1 Corresponding descriptors in the first image
-	/// @param[in] descriptors2 Corresponding descriptors in the second image
+	/// @param[in] descriptors1 Corresponding descriptors in the first image.
+	/// @param[in] descriptors2 Corresponding descriptors in the second image.
 	/// @returns Matching keypoints
 	std::vector<cv::DMatch> match(const Mat& descriptors1, const Mat& descriptors2);
 	
 	/// @brief Refine a matching using RANSAC and get an appropriate homography matrix
 	/// 
-	/// @param[in] keypoints1 Matching keypoints in the first image
-	/// @param[in] keypoints2 Corresponding matching keypoints in the second image
-	/// @param[in] matches Original matching keypoints
-	/// @param[out] inliers Filtered matching keypoints, after RANSAC
-	/// @returns Homography matrix
+	/// @param[in] keypoints1 Matching keypoints in the first image.
+	/// @param[in] keypoints2 Corresponding matching keypoints in the second image.
+	/// @param[in] matches Original matching keypoints.
+	/// @param[out] inliers Filtered matching keypoints, after RANSAC.
+	/// @returns Homography matrix.
 	Mat refineHomography(const std::vector<cv::KeyPoint>& keypoints1, const std::vector<cv::KeyPoint>& keypoints2,
 	                     const std::vector<cv::DMatch>& matches, std::vector<cv::DMatch>& inliers);
 	

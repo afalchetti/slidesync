@@ -107,7 +107,7 @@ public:
 	bool GoTo(int timestamp, unsigned int index);
 	
 	/// @brief Generate an appropriate string representation of the synchronization
-	string ToString();
+	string ToString() const;
 };
 
 }

@@ -93,7 +93,11 @@ SyncInstructions::SyncInstructions(string descriptor)
 			instruction = SYNC_PREVIOUS;
 		}
 		else if (instruction_str.compare(0, 6, "go to ") == 0) {
-			instruction = std::stoi(instruction_str.substr(6));
+			instruction = std::stoi(instruction_str.substr(6)) - 1;
+			
+			if (instruction < 0 || (unsigned int) instruction >= length) {
+				continue;
+			}
 		}
 		else {
 			continue;
@@ -140,7 +144,7 @@ bool SyncInstructions::GoTo(int timestamp, unsigned int index)
 	return true;
 }
 
-string SyncInstructions::ToString()
+string SyncInstructions::ToString() const
 {
 	std::ostringstream writer;
 	
@@ -170,7 +174,7 @@ string SyncInstructions::ToString()
 		writer << "]: ";
 		
 		if (instruction >= 0) {
-			writer << "go to" <<instruction;
+			writer << "go to " << (instruction + 1);
 		}
 		else {
 			switch(instruction) {

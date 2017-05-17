@@ -24,10 +24,42 @@
 #include <sstream>
 #include <ios>
 
+#include <wx/wxprec.h>
+ 
+#ifndef WX_PRECOMP
+	#include <wx/wx.h>
+#endif
+
 using std::string;
+
+namespace std
+{
+
+/// @brief Folder separator in paths
+#if defined(_WIN32) || defined(__CYGWIN__)
+const char pathsep = '\\';
+#else
+const char pathsep = '/';
+#endif
+
+}
 
 namespace slidesync
 {
+
+/// @brief Check if a character is an ASCII number
+/// 
+/// @param[in] c The (possibly wide) character to check.
+/// @returns True if the character is in the ASCII range ['0'-'9'].
+bool isnumeric(int c);
+
+/// @brief Compare strings lexicographically, but considering numbers as
+///        indivisible units, so "a" < "b", "1" < "2" and "frame-5" < "frame-23"
+/// 
+/// @param[in] a First string
+/// @param[in] b Second string
+/// @returns Zero if a == b; < 0 if a < b; > 0 if a > b
+int compare_lexiconumerical(const wxString& a, const wxString& b);
 
 /// @brief std::istream skip-literal target
 /// 

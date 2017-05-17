@@ -1,5 +1,5 @@
-/// @file Loops.cpp
-/// @brief Video processing loops
+/// @file SyncLoop.cpp
+/// @brief Synchronization processing loop
 // 
 // Part of SlideSync
 // 
@@ -19,11 +19,13 @@
 
 #include <cmath>
 #include <limits>
+#include <iostream>
+#include <fstream>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 
 #include <wx/wxprec.h>
-#include <wx/cmdline.h>
 #include <wx/timer.h>
  
 #ifndef WX_PRECOMP
@@ -31,7 +33,9 @@
 #endif
 
 #include "CVCanvas.hpp"
-#include "Loops.hpp"
+#include "ProcessLoop.hpp"
+#include "SyncLoop.hpp"
+#include "SyncInstructions.hpp"
 #include "util.hpp"
 
 using std::vector;
@@ -41,8 +45,10 @@ using cv::Mat;
 namespace slidesync
 {
 
-SyncLoop::SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, vector<Mat>* slides)
-	: canvas(canvas),
+SyncLoop::SyncLoop(CVCanvas* canvas, cv::VideoCapture* footage, vector<Mat>* slides,
+                   const string& cachefname)
+	: cachefname(cachefname),
+	  canvas(canvas),
 	  footage(footage),
 	  frame_index(0),
 	  coarse_index(0),
@@ -113,60 +119,6 @@ Mat SyncLoop::next_frame()
 	return frame;
 }
 
-/// @brief Generate a mask matrix which is only for pixels inside a Quad
-/// 
-/// @remarks Only valid for convex clockwise Quads
-/// @param[in] image Reference image to generate the mask
-/// @param[in] quad Filled Quad
-/// @returns Mask image
-static Mat quadmask(const Mat& image, const Quad& quad)
-{
-	Mat mask(image.rows, image.cols, CV_8U, cv::Scalar(0));
-	
-	// a convex quad is continuous so calculating the
-	// pixels where it intersects each scanline is
-	// enough to draw it quickly. These vectors will
-	// hold such intersections, then everything in between
-	// should be drawn. Note that the initialization makes
-	// the right edge zero, so nothing will be drawn by default
-	vector<int> leftedges (image.rows, image.cols);
-	vector<int> rightedges(image.rows, 0);
-	
-	std::unique_ptr<cv::LineIterator> lineit;
-	
-	cv::Point vertices[5] = {cv::Point(quad.X1, quad.Y1),
-	                         cv::Point(quad.X2, quad.Y2),
-	                         cv::Point(quad.X3, quad.Y3),
-	                         cv::Point(quad.X4, quad.Y4),
-	                         cv::Point(quad.X1, quad.Y1)};
-	
-	for (unsigned int i = 0; i < 4; i++) {
-		lineit.reset(new cv::LineIterator(image, vertices[i], vertices[i + 1], 4));
-		
-		for (int k = 0; k < lineit->count; k++, ++(*lineit)) {
-			cv::Point pixel = (*lineit).pos();
-			
-			if (pixel.x < leftedges[pixel.y]) {
-				leftedges[pixel.y] = pixel.x;
-			}
-			
-			if (pixel.x + 1 > rightedges[pixel.y]) {
-				rightedges[pixel.y] = pixel.x + 1;
-			}
-		}
-	}
-	
-	for (int i = 0; i < mask.rows; i++) {
-		unsigned char* row = mask.ptr<unsigned char>(i);
-		
-		for (int k = leftedges[i]; k < rightedges[i]; k++) {
-			row[k] = 255;
-		}
-	}
-	
-	return mask;
-}
-
 /// @brief Filter a list of keypoint into those keypoints inside a quad
 /// 
 /// @param[in] keypoints Image keypoints.
@@ -187,7 +139,6 @@ static vector<int> quadfilter(const vector<cv::KeyPoint>& keypoints, const Mat& 
 	
 	for (unsigned int i = 0, k = 0; i < keypoints.size(); i++) {
 		bool inside = quad.Inside(keypoints[i].pt.x, keypoints[i].pt.y);
-		
 		
 		if (inside) {
 			quad_keypoints.push_back(keypoints[i]);
@@ -347,7 +298,6 @@ static bool slidematch(const vector<cv::KeyPoint>& keypoints1, const vector<cv::
                        const vector<cv::DMatch>& matches, const Mat& homography,
                        const Quad& slidepose1, const Quad& slidepose2)
 {
-	
 	if (matches.size() < min_matchsize) {
 		return false;
 	}
@@ -542,7 +492,15 @@ void SyncLoop::track()
 	                             // conditions also apply such as slide change or a large camera movement)
 	
 	if (frame.empty()) {
+		std::cout << std::endl;
 		processor = &SyncLoop::idle;
+		
+		std::ofstream file(cachefname);
+		file << sync_instructions.ToString();
+		
+		LoopEvent loopfinished(LoopFinishedEvent);
+		wxPostEvent(this, loopfinished);
+		
 		return;
 	}
 	
@@ -579,9 +537,7 @@ void SyncLoop::track()
 		}
 	}
 	
-	//DEBUG
 	drawquad(display, ref_slidepose, cv::Scalar(20, 40, 255, 255));
-	// END DEBUG
 	
 	wxTheApp->Yield(true);
 	
@@ -695,15 +651,24 @@ void SyncLoop::track()
 		
 		if (goodmatch && bestslide != slide_index) {
 			make_keyframe = true;
+			
+			if (bestslide == slide_index + 1) {
+				sync_instructions.Next(frame_index);
+			}
+			else if (bestslide == slide_index - 1) {
+				sync_instructions.Previous(frame_index);
+			}
+			else {
+				sync_instructions.GoTo(frame_index, bestslide);
+			}
 		}
-		
-		//DEBUG
 		
 		// TODO make these HUDs interactive so the user can edit them if necessary
 		drawquad(display, bestslidepose, linecolor);
 		
 		wxTheApp->Yield(true);
 		
+		//DEBUG
 		//Mat display2;
 		//
 		//cv::drawMatches((*slides)[bestslide], slide_keypoints[bestslide], frame, quad_keypoints,
@@ -715,9 +680,9 @@ void SyncLoop::track()
 		badcount  = 0;
 		nearcount = 0;
 		
-		//DEBUG
 		drawquad(display, slidepose, cv::Scalar(125, 255, 42, 255));
 		
+		//DEBUG
 		//Mat display2;
 		//
 		//cv::drawMatches(ref_frame, ref_frame_keypoints, frame, frame_keypoints, filtered,
@@ -764,6 +729,6 @@ void SyncLoop::track()
 
 void SyncLoop::idle()
 {
-} 
+}
 
 }

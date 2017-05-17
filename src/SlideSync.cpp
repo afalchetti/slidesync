@@ -36,108 +36,14 @@
 
 #include "SlideSync.hpp"
 #include "CVCanvas.hpp"
-#include "Loops.hpp"
+#include "ProcessLoop.hpp"
+#include "SyncLoop.hpp"
+#include "GenLoop.hpp"
 #include "IMhelpers.hpp"
+#include "util.hpp"
 
 using std::string;
 using cv::Mat;
-
-namespace std
-{
-
-/// @brief Folder separator in paths
-#if defined(_WIN32) || defined(__CYGWIN__)
-const char pathsep = '\\';
-#else
-const char pathsep = '/';
-#endif
-
-}
-
-namespace slidesync
-{
-
-/// @brief Main synchronization window
-class SlideSyncWindow : public wxFrame
-{
-public:
-	/// @brief OpenGL canvas observer reference
-	CVCanvas* canvas;
-	
-private:
-	/// @brief Observer reference to the application's processing loop
-	std::unique_ptr<ProcessLoop>* processloop;
-	
-public:
-	/// @brief Construct a SlideSyncWindow with standard parameters
-	SlideSyncWindow(const wxString& title, const wxPoint& pos, std::unique_ptr<ProcessLoop>* processloop);
-	
-	/// @brief Set the internal processing loop observer
-	void SetProcessLoop(std::unique_ptr<ProcessLoop>* processloop);
-	
-	/// @brief Destroy the window and stop the timer
-	virtual bool Destroy() override;
-	
-private:
-	/// @brief Close the application on exit
-	void onexit(wxCommandEvent& event);
-	
-	/// @brief Show about dialog box
-	void onabout(wxCommandEvent& event);
-	
-	
-protected:
-	/// @brief Declaration of event signal routing table for SlideSyncWindow
-	wxDECLARE_EVENT_TABLE();
-};
-
-/// @brief Main application
-class SlideSyncApp : public wxApp
-{
-private:
-	/// @brief Stage in the process
-	SyncAppState appstate;
-	
-	/// @brief Filename of the recording footage
-	string videofname;
-	
-	/// @brief Filename of the presentation slides
-	string slidesfname;
-	
-	/// @brief Filename for the synchronization data that will be output
-	string outsyncfname;
-	
-	/// @brief Filename for the video data that will be output
-	string outvideofname;
-	
-	/// @brief Directory path for files contaning intermediate and cached results
-	string intermediatedir;
-	
-	/// @brief Captured video of the presentation
-	cv::VideoCapture footage;
-	
-	/// @brief Presentation slides
-	std::vector<Mat> slides;
-	
-	/// @brief Recurrent event based processing loop
-	std::unique_ptr<ProcessLoop> processloop;
-	
-public:
-	/// @brief Main entry point
-	virtual bool OnInit();
-	
-	/// @brief Configure command line parser
-	/// 
-	/// @param[in] parser Command line parser.
-	virtual void OnInitCmdLine(wxCmdLineParser& parser);
-	
-	/// @brief Process command line arguments
-	/// 
-	/// @param[in] parser Command line parser.
-	virtual bool OnCmdLineParsed(wxCmdLineParser& parser);
-};
-
-}
 
 using slidesync::SlideSyncApp;
 using slidesync::SlideSyncWindow;
@@ -211,68 +117,6 @@ void SlideSyncWindow::onabout(wxCommandEvent& event)
 }
 
 // SlideSyncApp definitions
-
-/// @brief True if the (possibly wide) character c is an ASCII number
-bool isnumeric(int c)
-{
-	return '0' <= c && c <= '9';
-}
-
-/// @brief Compare strings lexicographically, but considering numbers as
-///        indivisible units, so "a" < "b", "1" < "2" and "frame-5" < "frame-23"
-/// 
-/// @param[in] a First string
-/// @param[in] b Second string
-/// @returns Zero if a == b; < 0 if a < b; > 0 if a > b
-int compare_lexiconumerical(const wxString& a, const wxString& b)
-{
-	unsigned int i;
-	unsigned int k;
-	int          diff;
-	
-	for (i = 0, k = 0; i < a.length() && k < b.length(); i++, k++) {
-		if (isnumeric(a[i]) && isnumeric(b[k])) {
-			unsigned int p;
-			unsigned int q;
-			
-			// p and q will point to the end of the number
-			for (p = i + 1; p < a.length() && isnumeric(a[p]); p++) {}
-			for (q = k + 1; q < b.length() && isnumeric(b[q]); q++) {}
-			
-			// char lengths of the numbers
-			int alen = p - i;
-			int blen = q - k;
-			
-			if (alen != blen) {
-				return alen - blen;
-			}
-			
-			// the numbers have the same length, they can be compared lexicographically
-			for (; i < p; i++, k++) {
-				diff = (int) a[i] - (int) b[k];
-				
-				if (diff != 0) {
-					return diff;
-				}
-			}
-			
-			i = p - 1;
-			k = q - 1;
-		}
-		else {
-			diff = (int) a[i] - (int) b[k];
-			
-			if (diff != 0) {
-				return diff;
-			}
-		}
-	}
-	
-	int aremaining = a.length() - i;
-	int bremaining = b.length() - k;
-	
-	return aremaining - bremaining;
-}
 
 /// @brief read a pdf file into OpenCV matrices
 /// 
@@ -384,18 +228,23 @@ bool SlideSyncApp::OnInit()
 	slides = readpdf(slidesfname, width, height, intermediatedir + std::pathsep + "slides");
 	std::cout << "PDF reading complete" << std::endl;
 	
-	SlideSyncWindow* window = new SlideSyncWindow("SlideSync", wxDefaultPosition, nullptr);
+	window = new SlideSyncWindow("SlideSync", wxDefaultPosition, nullptr);
 	
 	window->SetClientSize(width, height);
 	window->Show(true);
 	
 	window->canvas->Initialize(width, height);
 	
-	processloop = std::unique_ptr<ProcessLoop>(new SyncLoop(window->canvas, &footage, &slides));
+	processloop = std::unique_ptr<ProcessLoop>(new SyncLoop(window->canvas, &footage, &slides,
+	                                                        intermediatedir + std::pathsep + "raw.sync"));
 	window->SetProcessLoop(&processloop);
+	
+	processloop->Bind(LoopFinishedEvent, &SlideSyncApp::OnSyncFinished, this);
 	
 	appstate = SyncAppState::Synchronizing;
 	window->SetStatusText("Synchronizing");
+	
+	std::cout << "Synchronizing..." << std::endl;
 	
 	processloop->Start(40);
 	
@@ -431,6 +280,23 @@ bool SlideSyncApp::OnCmdLineParsed(wxCmdLineParser& parser)
 	intermediatedir = videofname + ".d";
 	
 	return true;
+}
+
+void SlideSyncApp::OnSyncFinished(wxEvent& event)
+{
+	processloop->Stop();
+	processloop.reset(new GenLoop());
+	processloop->Bind(LoopFinishedEvent, &SlideSyncApp::OnGenFinished, this);
+	
+	appstate = SyncAppState::GeneratingVideo;
+	window->SetStatusText("Generating video");
+	
+	std::cout << "Generating video..." << std::endl;
+}
+
+void SlideSyncApp::OnGenFinished(wxEvent& event)
+{
+	processloop->Stop();
 }
 
 }
