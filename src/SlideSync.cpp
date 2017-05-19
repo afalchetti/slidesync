@@ -39,6 +39,7 @@
 #include "ProcessLoop.hpp"
 #include "SyncLoop.hpp"
 #include "GenLoop.hpp"
+#include "avhelpers.hpp"
 #include "IMhelpers.hpp"
 #include "util.hpp"
 
@@ -102,7 +103,9 @@ void SlideSyncWindow::SetProcessLoop(std::unique_ptr<ProcessLoop>* processloop)
 
 bool SlideSyncWindow::Destroy()
 {
-	(*processloop)->Stop();
+	if ((*processloop) != nullptr) {
+		(*processloop)->Stop();
+	}
 	return wxFrame::Destroy();
 }
 
@@ -123,8 +126,10 @@ void SlideSyncWindow::onabout(wxCommandEvent& event)
 /// @param[in] filename PDF slides filename.
 /// @param[in] framewidth Width of a footage frame for size reference.
 /// @param[in] frameheight Height of a footage frame for size reference.
-/// @param[in] cache_directory Directory to find/save a cache for this conversion
-std::vector<Mat> readpdf(string filename, int framewidth, int frameheight, string cache_directory)
+/// @param[in] cache_directory Directory to find/save a cache for this conversion.
+/// @param[in] grayscale Read the image in grayscale instead of RGB.
+std::vector<Mat> readpdf(string filename, int framewidth, int frameheight,
+                         string cache_directory, bool grayscale)
 {
 	std::vector<Mat> slides;
 	
@@ -145,7 +150,8 @@ std::vector<Mat> readpdf(string filename, int framewidth, int frameheight, strin
 		
 		if (files.GetCount() > 0) {
 			for (unsigned int i = 0; i < files.GetCount(); i++) {
-				Mat slide = cv::imread(files.Item(i).ToStdString(), CV_LOAD_IMAGE_GRAYSCALE);
+				Mat slide = cv::imread(files.Item(i).ToStdString(), (grayscale) ? CV_LOAD_IMAGE_GRAYSCALE :
+				                                                                  CV_LOAD_IMAGE_COLOR);
 				
 				slides.push_back(slide);
 			}
@@ -182,10 +188,10 @@ std::vector<Mat> readpdf(string filename, int framewidth, int frameheight, strin
 		// It doesn't own the memory (which will be freed at the end of this function);
 		// clone() or cvtColor() is required to copy the buffer into a memory-owning OpenCV matrix
 		
-		Mat gray;
+		Mat slide;
 		
-		cv::cvtColor(cv_frame, gray, cv::COLOR_RGBA2GRAY);
-		slides.push_back(gray);
+		cv::cvtColor(cv_frame, slide, (grayscale) ? cv::COLOR_RGBA2GRAY : cv::COLOR_RGBA2BGR);
+		slides.push_back(slide);
 	}
 	
 	for (unsigned int i = 0; i < slides_im.size(); i++) {
@@ -222,10 +228,21 @@ bool SlideSyncApp::OnInit()
 	unsigned int width  = (unsigned int) footage.get(cv::CAP_PROP_FRAME_WIDTH);
 	unsigned int height = (unsigned int) footage.get(cv::CAP_PROP_FRAME_HEIGHT);
 	
-	Magick::InitializeMagick(argv[0]);
+	unsigned int width_hires  = 1920;
+	unsigned int height_hires = 1080;
 	
-	std::cout << "Reading PDF slides file '" << slidesfname << "'" << std::endl;
-	slides = readpdf(slidesfname, width, height, intermediatedir + std::pathsep + "slides");
+	Magick::InitializeMagick(argv[0]);
+	libav::initialize_ffmpeg();
+	
+	string slides_directory = intermediatedir + std::pathsep + "slides";
+	
+	if (!wxDir::Exists(slides_directory)) {
+		wxDir::Make(slides_directory);
+	}
+	
+	std::cout << "Reading PDF slides file '" << slidesfname << "'" << std::endl << std::flush;
+	slides       = readpdf(slidesfname, width, height, slides_directory + std::pathsep + "gray", true);
+	slides_hires = readpdf(slidesfname, width_hires, height_hires, slides_directory + std::pathsep + "hires", false);
 	std::cout << "PDF reading complete" << std::endl;
 	
 	window = new SlideSyncWindow("SlideSync", wxDefaultPosition, nullptr);
@@ -282,21 +299,28 @@ bool SlideSyncApp::OnCmdLineParsed(wxCmdLineParser& parser)
 	return true;
 }
 
-void SlideSyncApp::OnSyncFinished(wxEvent& event)
+void SlideSyncApp::OnSyncFinished(LoopEvent& event)
 {
+	// note that the static_cast is valid as long as only SyncLoops use this callback;
+	// any other case is an error anyway
 	processloop->Stop();
-	processloop.reset(new GenLoop());
+	processloop.reset(new GenLoop(&slides_hires, static_cast<SyncLoop*>(processloop.get())->GetSyncInstructions(),
+	                              outvideofname));
 	processloop->Bind(LoopFinishedEvent, &SlideSyncApp::OnGenFinished, this);
 	
 	appstate = SyncAppState::GeneratingVideo;
 	window->SetStatusText("Generating video");
 	
 	std::cout << "Generating video..." << std::endl;
+	
+	processloop->Start(40);
 }
 
-void SlideSyncApp::OnGenFinished(wxEvent& event)
+void SlideSyncApp::OnGenFinished(LoopEvent& event)
 {
 	processloop->Stop();
+	processloop.reset(nullptr);
+	window->Close();
 }
 
 }

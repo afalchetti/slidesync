@@ -150,7 +150,7 @@ private:
 	/// (and function delegates are nicer than big switches).
 	SyncProcessorFn processor;
 	
-	/// @brief Flag indicating if the loop is currently processing a frame or is idle
+	/// @brief Flag indicating if the loop is currently processing a frame or not
 	bool processing;
 	
 public:

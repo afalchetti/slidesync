@@ -1,4 +1,4 @@
-/// @file SlideSync.hpp
+/// @file IMhelpers.hpp
 /// @brief ImageMagick-based functions header file
 /// 
 /// ImageMagick is messy and includes many things into the global namespace
@@ -27,6 +27,7 @@
 #define IMHELPERS_HPP 1
 
 #include <vector>
+#include <string>
 
 using std::string;
 
@@ -40,14 +41,14 @@ namespace MagickCore
 ///          its own namespace, so there's no type problem
 enum class StorageType_
 {
-  UndefinedPixel,
-  CharPixel,
-  DoublePixel,
-  FloatPixel,
-  LongPixel,
-  LongLongPixel,
-  QuantumPixel,
-  ShortPixel
+	UndefinedPixel,
+	CharPixel,
+	DoublePixel,
+	FloatPixel,
+	LongPixel,
+	LongLongPixel,
+	QuantumPixel,
+	ShortPixel
 };
 
 }
@@ -85,7 +86,7 @@ namespace slidesync
 /// @param[in] filename PDF slides filename.
 /// @param[in] framewidth Width of a footage frame for size reference.
 /// @param[in] frameheight Height of a footage frame for size reference.
-std::vector<Magick::Image*> readpdf_im(string filename, int framewidth, int frameheight);
+std::vector<Magick::Image*> readpdf_im(const string& filename, int framewidth, int frameheight);
 
 }
 

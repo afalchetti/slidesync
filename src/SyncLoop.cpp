@@ -409,15 +409,15 @@ void SyncLoop::initialize()
 		std::ifstream instructions(cachefname);
 		
 		try {
+			processor         = &SyncLoop::idle;
 			sync_instructions = SyncInstructions(instructions);
+			
 			LoopEvent loopfinished(LoopFinishedEvent);
 			wxPostEvent(this, loopfinished);
-			
-			processor = &SyncLoop::idle;
 			return;
 		}
 		catch (const std::ios_base::failure& e) {
-			std::cerr << "Can't parse instructions file" << std::endl << e.what() << std::endl;
+			std::cerr << "Can't parse instructions file" << std::endl;
 		}
 	}
 	
@@ -510,6 +510,9 @@ void SyncLoop::track()
 	
 	if (frame.empty()) {
 		std::cout << std::endl;
+		
+		sync_instructions.End(frame_index);
+		
 		processor = &SyncLoop::idle;
 		
 		std::ofstream file(cachefname);
@@ -744,8 +747,6 @@ void SyncLoop::track()
 	std::cout << std::endl;
 }
 
-void SyncLoop::idle()
-{
-}
+void SyncLoop::idle() {}
 
 }

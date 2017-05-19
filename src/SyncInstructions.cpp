@@ -57,11 +57,14 @@ SyncInstructions::SyncInstructions(std::istream& descriptor)
 		// and between allowing the left space and forbidding the right one, the lenient first option is
 		// preferred to maximize user happiness (see: HTML parsers :P)
 		
-		bool relative = (descriptor.peek() == '+');
-		int  index = 0;
+		SyncInstruction instruction;
 		
+		instruction.relative  = (descriptor.peek() == '+');
+		instruction.timestamp = 0;
+		instruction.code      = SyncInstructionCode::Undefined;
+		instruction.data      = 0;
 		
-		if (relative) {  // discard the "+"
+		if (instruction.relative) {  // discard the "+"
 			descriptor.get();
 		}
 		
@@ -69,32 +72,31 @@ SyncInstructions::SyncInstructions(std::istream& descriptor)
 			string timestamp(11, ' ');  // "HH:mm:ss.FF"
 			descriptor.read(&timestamp[0], 11);
 			
-			index = timestamp2index(timestamp, framerate);
+			instruction.timestamp = timestamp2index(timestamp, framerate);
 		}
 		else {
-			descriptor >> index;
+			descriptor >> instruction.timestamp;
 		}
 		
-		if (relative) {
-			index = -index;
-		}
-		
-		descriptor >> Skip("]") >> Skip(":");
+		descriptor >> Skip("]") >> Skip(":") >> Skip("");
 		
 		string instruction_str;
 		std::getline(descriptor, instruction_str, '\n');
-		int    instruction;
 		
 		if (instruction_str == "next") {
-			instruction = SYNC_NEXT;
+			instruction.code = SyncInstructionCode::Next;
 		}
 		else if (instruction_str == "previous") {
-			instruction = SYNC_PREVIOUS;
+			instruction.code = SyncInstructionCode::Previous;
+		}
+		else if (instruction_str == "end") {
+			instruction.code = SyncInstructionCode::End;
 		}
 		else if (instruction_str.compare(0, 6, "go to ") == 0) {
-			instruction = std::stoi(instruction_str.substr(6)) - 1;
+			instruction.code = SyncInstructionCode::GoTo;
+			instruction.data = std::stoi(instruction_str.substr(6)) - 1;
 			
-			if (instruction < 0 || (unsigned int) instruction >= length) {
+			if (instruction.data < 0 || instruction.data >= length) {
 				continue;
 			}
 		}
@@ -102,45 +104,67 @@ SyncInstructions::SyncInstructions(std::istream& descriptor)
 			continue;
 		}
 		
-		instructions.push_back(std::make_tuple(index, instruction));
+		instructions.push_back(instruction);
 	}
 	
 }
 
-bool SyncInstructions::Next(int timestamp)
+bool SyncInstructions::Next(unsigned int timestamp, bool relative)
 {
 	if (current_index >= length - 1) {
 		return false;
 	}
 	
-	instructions.push_back(std::make_tuple(timestamp, SYNC_NEXT));
+	instructions.push_back(SyncInstruction{timestamp, SyncInstructionCode::Next, 0, relative});
 	current_index += 1;
 	
 	return true;
 }
 
-bool SyncInstructions::Previous(int timestamp)
+bool SyncInstructions::Previous(unsigned int timestamp, bool relative)
 {
 	if (current_index < 1) {
 		return false;
 	}
 	
-	instructions.push_back(std::make_tuple(timestamp, SYNC_PREVIOUS));
+	instructions.push_back(SyncInstruction{timestamp, SyncInstructionCode::Previous, 0, relative});
 	current_index -= 1;
 	
 	return true;
 }
 
-bool SyncInstructions::GoTo(int timestamp, unsigned int index)
+bool SyncInstructions::GoTo(unsigned int timestamp, unsigned int index, bool relative)
 {
 	if (index >= length) {
 		return false;
 	}
 	
-	instructions.push_back(std::make_tuple(timestamp, index));
+	instructions.push_back(SyncInstruction{timestamp, SyncInstructionCode::GoTo, index, relative});
 	current_index = index;
 	
 	return true;
+}
+
+bool SyncInstructions::End(unsigned int timestamp, bool relative)
+{
+	instructions.push_back(SyncInstruction{timestamp, SyncInstructionCode::End, 0, relative});
+	
+	return true;
+}
+
+SyncInstructions::const_iterator SyncInstructions::cbegin()
+{
+	return instructions.cbegin();
+}
+
+SyncInstructions::const_iterator SyncInstructions::cend()
+{
+	return instructions.cend();
+}
+
+int SyncInstructions::Framerate() const
+{
+	return framerate;
 }
 
 string SyncInstructions::ToString() const
@@ -153,41 +177,42 @@ string SyncInstructions::ToString() const
 	writer << "ninstructions = " << instructions.size() << "\n";
 	
 	for (unsigned int i = 0; i < instructions.size(); i++) {
-		int index       = std::get<0>(instructions[i]);
-		int instruction = std::get<1>(instructions[i]);
+		SyncInstruction instruction = instructions[i];
 		
 		writer << "[";
 		
-		if (index < 0) {
+		if (instruction.relative < 0) {
 			writer << "+";
-			index = -index;
 		}
 		
 		if (framerate != 0) {
-			writer << index2timestamp(index, framerate);
+			writer << index2timestamp(instruction.timestamp, framerate);
 		}
 		else {
-			writer << index;
+			writer << instruction.timestamp;
 		}
 		
 		writer << "]: ";
 		
-		if (instruction >= 0) {
-			writer << "go to " << (instruction + 1);
-		}
-		else {
-			switch(instruction) {
-			case SYNC_NEXT:
-				writer << "next";
-				break;
-				
-			case SYNC_PREVIOUS:
-				writer << "previous";
-				break;
-				
-			default:
-				writer << "unrecognized(" << -instruction << ")";
-			}
+		switch (instruction.code) {
+		case SyncInstructionCode::GoTo:
+			writer << "go to " << (instruction.data + 1);
+			break;
+			
+		case SyncInstructionCode::Next:
+			writer << "next";
+			break;
+			
+		case SyncInstructionCode::Previous:
+			writer << "previous";
+			break;
+			
+		case SyncInstructionCode::End:
+			writer << "end";
+			break;
+			
+		default:
+			writer << "unrecognized(" << static_cast<int>(instruction.code) << ")";
 		}
 		
 		writer << "\n";

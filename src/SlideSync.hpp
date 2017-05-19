@@ -116,8 +116,11 @@ private:
 	/// @brief Captured video of the presentation
 	cv::VideoCapture footage;
 	
-	/// @brief Presentation slides
+	/// @brief Presentation slides, grayscale low resolution (for image processing)
 	std::vector<Mat> slides;
+	
+	/// @brief Presentation slides, high resolution (for output)
+	std::vector<Mat> slides_hires;
 	
 	/// @brief Recurrent event based processing loop
 	std::unique_ptr<ProcessLoop> processloop;
@@ -137,10 +140,10 @@ public:
 	virtual bool OnCmdLineParsed(wxCmdLineParser& parser);
 	
 	/// @brief Event handler for the LoopFinished event raised by the synchronization loop
-	void OnSyncFinished(wxEvent& event);
+	void OnSyncFinished(LoopEvent& event);
 	
 	/// @brief Event handler for the LoopFinished event raised by the video generation loop
-	void OnGenFinished(wxEvent& event);
+	void OnGenFinished(LoopEvent& event);
 };
 
 }

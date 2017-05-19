@@ -8,7 +8,7 @@ or edited with the original footage, which is easy since there's no aligning req
 
 ### Prerequisites
 
-This package depends on OpenCV 3, wxWidgets 3, OpenGL 3+ and ImageMagick 7 (with 8 bit quantum).
+This package depends on OpenCV 3, wxWidgets 3, OpenGL 3+, FFMPEG and ImageMagick 7 (with 8 bit quantum).
 
 ## Authors
 

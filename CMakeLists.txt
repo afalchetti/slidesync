@@ -49,6 +49,9 @@ find_package(ImageMagick 7 REQUIRED COMPONENTS Magick++ convert)
 find_package(wxWidgets 3 REQUIRED)
 include(${wxWidgets_USE_FILE})
 
+set(ffmpeg_LIBRARIES avformat avcodec avutil)
+add_cxx_flag("-D__STDC_CONSTANT_MACROS")
+
 # ImageMagick flags
 add_cxx_flag("-fopenmp")
 
@@ -61,5 +64,5 @@ add_custom_target(doc ALL
                   VERBATIM)
 
 add_executable(slidesync "src/util.cpp" "src/Quad.cpp" "src/SyncInstructions.cpp" "src/CVCanvas.cpp"
-                         "src/ProcessLoop.cpp" "src/SyncLoop.cpp" "src/GenLoop.cpp" "src/IMhelpers.cpp" "src/SlideSync.cpp")
-target_link_libraries(slidesync ${ImageMagick_LIBRARIES} ${OpenCV_LIBS} ${wxWidgets_LIBRARIES} ${OPENGL_LIBRARIES})
+                         "src/ProcessLoop.cpp" "src/SyncLoop.cpp" "src/GenLoop.cpp" "src/IMhelpers.cpp" "src/avhelpers.cpp" "src/SlideSync.cpp")
+target_link_libraries(slidesync ${ImageMagick_LIBRARIES} ${ffmpeg_LIBRARIES} ${OpenCV_LIBS} ${wxWidgets_LIBRARIES} ${OPENGL_LIBRARIES})

@@ -54,7 +54,7 @@ void imageDelete(Image* image)
 namespace slidesync
 {
 
-std::vector<Magick::Image*> readpdf_im(string filename, int framewidth, int frameheight)
+std::vector<Magick::Image*> readpdf_im(const string& filename, int framewidth, int frameheight)
 {
 	std::list<Magick::Image>    slides_list;
 	std::vector<Magick::Image*> slides;
